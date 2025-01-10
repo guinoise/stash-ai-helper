@@ -15,10 +15,39 @@ alembic upgrade head
 ```
 
 ## To create new revision
+### Shell (bash/sh)
+
+Set the variable COMMENT :
 
 ```
-alembic revision -m 'COMMENT'
-#Update the default DB (schema)
+COMMENT=""
+```
+
+Generate revision 
+```
+alembic revision --autogenerate -m "${COMMENT}"
+```
+
+Apply to the default database
+```
+alembic upgrade head
+```
+
+### Powershell
+
+Set the variable COMMENT :
+
+```
+$COMMENT=""
+```
+
+Generate revision 
+```
+alembic revision --autogenerate -m "$COMMENT"
+```
+
+Apply to the default database
+```
 alembic upgrade head
 ```
 
@@ -28,4 +57,5 @@ alembic upgrade head
 This file is NOT commited in the git repository but it contains the passwords for the database and zip files. Be carefull with the content of this file.
 
 # TODO
-- [x] Alembic init
+- [X] Alembic init
+- [ ] Fix the logger format

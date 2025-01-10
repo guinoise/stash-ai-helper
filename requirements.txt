@@ -5,3 +5,5 @@ alembic
 imagehash
 opencv-python
 gradio
+pillow
+pip-system-certs
