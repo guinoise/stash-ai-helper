@@ -47,23 +47,27 @@ def performer_gallery_select(selection, evt: gr.SelectData):
     
 def stash_performers_tab():
     with gr.Tab("Performers") as performers_tab:
-        with gr.Row():
-            with gr.Column():
-                with gr.Group():
-                    with gr.Row():
-                        txt_performer_name= gr.Textbox(label='Performer name')
-                        btn_search_performer_name= gr.Button(value='🔎', elem_classes="tool", min_width=10)
-            with gr.Column():
-                with gr.Group():
-                    with gr.Row():
-                        txt_performer_id= gr.Number(label='Performer id', precision=0)
-                        btn_search_performer_id= gr.Button(value='🔎', elem_classes="tool", min_width=10)
-        with gr.Row(visible=config.dev_mode):
-            with gr.Accordion(label="Dev", open=False):
-                performers_results= gr.Json(label="Performers results")
-        with gr.Row():
-            with gr.Column():
-                performer_gallery= gr.Gallery(label='Performers', allow_preview=False, object_fit='contain', height="90vh")
+        with gr.Tab("Search"):
+            with gr.Row():
+                with gr.Column():
+                    with gr.Group():
+                        with gr.Row():
+                            txt_performer_name= gr.Textbox(label='Performer name')
+                            btn_search_performer_name= gr.Button(value='🔎', elem_classes="tool", min_width=10)
+
+            with gr.Row(visible=config.dev_mode):
+                with gr.Accordion(label="Dev", open=False):
+                    performers_results= gr.Json(label="Performers results")
+            with gr.Row():
+                with gr.Column():
+                    performer_gallery= gr.Gallery(label='Performers', allow_preview=False, object_fit='contain', height="90vh")
+        with gr.Tab("Performer"):
+            with gr.Row():
+                with gr.Column():
+                    with gr.Group():
+                        with gr.Row():
+                            txt_performer_id= gr.Number(label='Performer id', precision=0)
+                            btn_search_performer_id= gr.Button(value='🔎', elem_classes="tool", min_width=10)
     btn_search_performer_name.click(search_performer_by_name, inputs=[txt_performer_name], outputs=[performer_gallery, performers_results])
     txt_performer_name.submit(search_performer_by_name, inputs=[txt_performer_name], outputs=[performer_gallery, performers_results])
     performer_gallery.select(performer_gallery_select, performer_gallery, None)
