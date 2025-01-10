@@ -13,7 +13,7 @@ def dev_tab():
                 gr.Json(label='Stash configuration', value=config.stash_configuration)
             with gr.Row():
                 with gr.Accordion("Stash boxes raw", open=False):
-                    gr.Json(label='Stash boxes configuration', value=config.stash_configuration.get('general', {}).get('stashBoxes', []))
+                    gr.Json(label='Stash boxes configuration', value=(config.stash_configuration.get('general', {}).get('stashBoxes', []) if config.stash_configuration is not None else None))
                 with gr.Accordion("Stash boxes processed", open=False):
                     gr.HTML(value='TODO')
                 
