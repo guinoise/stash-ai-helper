@@ -4,6 +4,7 @@ local_scenes/
 stash-ai.sqlite3
 stash-ai.sqlite3.bk
 config.json
+debug.json
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
