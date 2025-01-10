@@ -65,4 +65,5 @@ def stash_performers_tab():
             with gr.Column():
                 performer_gallery= gr.Gallery(label='Performers', allow_preview=False, object_fit='contain', height="90vh")
     btn_search_performer_name.click(search_performer_by_name, inputs=[txt_performer_name], outputs=[performer_gallery, performers_results])
+    txt_performer_name.submit(search_performer_by_name, inputs=[txt_performer_name], outputs=[performer_gallery, performers_results])
     performer_gallery.select(performer_gallery_select, performer_gallery, None)
