@@ -6,6 +6,9 @@ from stashapi.stashbox import StashBoxInterface
 from typing import Optional, ClassVar, List
 from PIL import Image
 from datetime import datetime
+from stash_ai.config import config
+import pathlib
+
 class BaseModel(DeclarativeBase):
     pass
 
@@ -34,6 +37,17 @@ class PerformerStashBoxImage(BaseModel):
     last_status_code: Mapped[Optional[int]]
     stash_box: Mapped["StashBox"]= relationship(back_populates="performer_images")
     performer: Mapped["Performer"]= relationship(back_populates="stashbox_images")
+
+    _image_path: ClassVar[pathlib.Path]= None
+    
+    def get_image_path(self):
+        if self.relative_path is None:
+            return None
+        if self._image_path is None:
+            self._image_path= config.data_dir.joinpath(self.relative_path)
+            
+        return self._image_path
+    
     def __repr__(self):
         return f"{self.__class__.__module__}.{self.__class__.__name__} (Image id: {self.image_id} Performer Id : {self.performer_id} Performer name: {self.performer.name} Stash box : {self.stash_box.name})"
 

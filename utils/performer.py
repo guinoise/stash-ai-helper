@@ -127,22 +127,25 @@ def download_stash_box_images_for_performer(performer: Performer, session: Sessi
                     session.add(img_data)
             session.commit()
 
-def get_downloaded_stash_box_images_for_performer(performer: Performer, session: Session) -> List[Image.Image]:
+def get_downloaded_stash_box_images_for_performer(performer: Performer, session: Session, return_tuple_ids: bool= False) -> List[Image.Image]:
     logger.info(f"Loading stash box images for performer {performer.name} [{performer.id}]")
     pil_images= []
-
+    ids=[]
     statement= select(PerformerStashBoxImage).where(PerformerStashBoxImage.performer_id == performer.id)
     img_data: PerformerStashBoxImage
     for row in session.execute(statement).fetchall():
         img_data: PerformerStashBoxImage= row[0]
-        if img_data.relative_path is None:
+        if img_data.get_image_path() is None:
             logger.warning(f"No image path for {img_data.image_id} stash box id {img_data.stash_box_id}")
             continue
-        image_path= config.data_dir.joinpath(img_data.relative_path)
-        logger.debug(f"Image path : {image_path.resolve()}")
+        
+        logger.debug(f"Image path : {img_data.get_image_path().resolve()}")
         try:
-            img= Image.open(image_path)
+            img= Image.open(img_data.get_image_path())
             pil_images.append(img)
+            ids.append({"image_id":img_data.image_id, "performer_id": img_data.performer_id, "stash_box_id": img_data.stash_box_id})
         except Exception as e:
-            logger.error(f"Error opening image at {image_path.resolve()} : {e!s}")        
+            logger.error(f"Error opening image at {img_data.get_image_path().resolve()} : {e!s}")        
+    if return_tuple_ids:
+        return (pil_images, ids)
     return pil_images
