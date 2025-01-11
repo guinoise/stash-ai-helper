@@ -9,6 +9,8 @@ from stash_ai.db import get_session
 from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer
 from sqlalchemy import select
 
+SEARCH_IMG_MAX_SIZE=(150,300)
+
 def download_images_from_stash_box(performer_id):
     logger.info(f"Download images from stashbox for performer {performer_id}")
     images= None
@@ -67,6 +69,7 @@ def search_performer_by_name(txt_performer_name):
                 if img is None:
                     logger.error(f"Error img is none {performer.id}")
                 else:
+                    #img.thumbnail(SEARCH_IMG_MAX_SIZE)
                     performers_images.append((img, f"{performer.name} ({performer.id})"))
             session.commit()
     else:
@@ -92,7 +95,7 @@ def stash_performers_tab():
             with gr.Row():
                 with gr.Column():
                     img_performer= gr.Image(label='Main image')
-                    performer_stash_images= gr.Gallery(label='Stash Images', object_fit='contain', height="90vh")
+                    performer_stash_images= gr.Gallery(label='Stash Images', object_fit='contain')
                 with gr.Column(scale=5):
                     with gr.Accordion(label="Dev", open=False):
                         performer_json= gr.Json(label="Stash box")
@@ -117,7 +120,7 @@ def stash_performers_tab():
                     performers_results= gr.Json(label="Performers results")
             with gr.Row():
                 with gr.Column():
-                    performer_gallery= gr.Gallery(label='Performers', allow_preview=False, object_fit='contain', height="90vh")                    
+                    performer_gallery= gr.Gallery(label='Performers', allow_preview=False, object_fit='contain', columns=4)                    
                     
     btn_search_performer_name.click(search_performer_by_name, inputs=[txt_search_performer_name], outputs=[performer_gallery, performers_results])
     txt_search_performer_name.submit(search_performer_by_name, inputs=[txt_search_performer_name], outputs=[performer_gallery, performers_results])

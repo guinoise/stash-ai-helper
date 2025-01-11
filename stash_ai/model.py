@@ -47,7 +47,7 @@ class PerformerStashBox(BaseModel):
     performer: Mapped["Performer"]= relationship(back_populates="stash_boxes_id")
 
     def __repr__(self):
-        return f"{self.__class__.__module__}.{self.__class__.__name__} (Performer Id : {self.performer_id} Performer name: {self.performer.name} Stash box : {self.stash_box.name}, Stash Id : {self.stash_id})"
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (Performer Id : {self.performer_id} Performer name: {self.performer.name} Stash box : {self.stash_box.name if self.stash_box is not None else None}, Stash Id : {self.stash_id})"
     
 class StashBox(BaseModel):
     __tablename__= "stash_box"
