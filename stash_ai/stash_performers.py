@@ -53,6 +53,7 @@ def search_performer_by_name(txt_performer_name):
     
     performers= None
     performers_images= []
+    performers_ids= []
     if config.stash_interface is None:
         gr.Warning("Not connected to stash")
     elif txt_performer_name:
@@ -71,60 +72,76 @@ def search_performer_by_name(txt_performer_name):
                 else:
                     #img.thumbnail(SEARCH_IMG_MAX_SIZE)
                     performers_images.append((img, f"{performer.name} ({performer.id})"))
+                    performers_ids.append(performer.id)
             session.commit()
     else:
         gr.Warning("Could not perform a full search.", duration=2)
     
-        
-    return [performers_images,performers]
-
-def performer_gallery_select(selection, evt: gr.SelectData):
-    logger.info(f"Performer gallery selection : {selection} {evt!r}")
+    return [performers_images,performers, performers_ids]
+def stash_image_selection(gallery, evt: gr.SelectData):
+    logger.info(f"Performer stash selection : {gallery} {evt!r}")
     logger.info(f"You selected {evt.value} at {evt.index} from {evt.target}")
+    return [None, None]
+
+def performer_gallery_select(selection, ids, evt: gr.SelectData):
+    if evt.index > len(ids):
+        raise gr.Error("State invalid, could not retrieve selected image")
+    logger.info(f"Performer id selected : {ids[evt.index]}")
+    return [ids[evt.index], gr.Tabs(selected=10)]
     #logger.info(f"{type(evt.value.get('image'))}")
     
 def stash_performers_tab():
     with gr.Tab("Performers") as performers_tab:
-        with gr.Tab("Performer"):
-            with gr.Row():
-                with gr.Column():
-                    with gr.Group():
-                        with gr.Row():
-                            txt_performer_id= gr.Number(label='Performer id', precision=0)
-                            btn_load_performer_id= gr.Button(value='🔄', elem_classes="tool", min_width=10)
-            with gr.Row():
-                with gr.Column():
-                    img_performer= gr.Image(label='Main image')
-                    performer_stash_images= gr.Gallery(label='Stash Images', object_fit='contain')
-                with gr.Column(scale=5):
-                    with gr.Accordion(label="Dev", open=False):
-                        performer_json= gr.Json(label="Stash box")
-                    with gr.Row():
-                        txt_current_performer_id= gr.Text(value= '', visible=False)
-                        txt_performer_name= gr.Textbox(label='Performer name', interactive=False)
+        with gr.Tabs() as main_tab:
+            with gr.TabItem("Performer", id=10):
+                with gr.Row():
+                    with gr.Column():
                         with gr.Group():
-                            txt_performer_stashes= gr.Textbox(label='Stash box', interactive=False)
-                            btn_download_images_from_stash_box= gr.Button(value= 'Download images from stash box', icon='assets/download.png', min_width=60)
-                    
-
-        with gr.Tab("Search"):
-            with gr.Row():
-                with gr.Column():
-                    with gr.Group():
+                            with gr.Row():
+                                txt_performer_id= gr.Number(label='Performer id', precision=0)
+                                btn_load_performer_id= gr.Button(value='🔄', elem_classes="tool", min_width=10)
+                with gr.Row():
+                    with gr.Column():
+                        img_performer_main= gr.Image(label='Main image')
+                        performer_stash_images= gr.Gallery(label='Stash Images', object_fit='contain')
+                    with gr.Column(scale=5):
+                        with gr.Accordion(label="Dev", open=False):
+                            performer_json= gr.Json(label="Stash box")
                         with gr.Row():
-                            txt_search_performer_name= gr.Textbox(label='Performer name')
-                            btn_search_performer_name= gr.Button(value='🔎', elem_classes="tool", min_width=10)
+                            txt_current_performer_id= gr.Text(value= '', visible=False)
+                            txt_performer_name= gr.Textbox(label='Performer name', interactive=False)
+                            with gr.Group():
+                                txt_performer_stashes= gr.Textbox(label='Stash box', interactive=False)
+                                btn_download_images_from_stash_box= gr.Button(value= 'Download images from stash box', icon='assets/download.png', min_width=60)
+                        with gr.Row():
+                            with gr.Column():
+                                img_performer= gr.Image()
+                            with gr.Column():
+                                plot_analysis= gr.Plot()
+                        
 
-            with gr.Row(visible=config.dev_mode):
-                with gr.Accordion(label="Dev", open=False):
-                    performers_results= gr.Json(label="Performers results")
-            with gr.Row():
-                with gr.Column():
-                    performer_gallery= gr.Gallery(label='Performers', allow_preview=False, object_fit='contain', columns=4)                    
+            with gr.TabItem("Search", id=11):
+                with gr.Row():
+                    with gr.Column():
+                        with gr.Group():
+                            with gr.Row():
+                                state_search_performer= gr.BrowserState([])
+                                txt_search_performer_name= gr.Textbox(label='Performer name')
+                                btn_search_performer_name= gr.Button(value='🔎', elem_classes="tool", min_width=10)
+
+                with gr.Row(visible=config.dev_mode):
+                    with gr.Accordion(label="Dev", open=False):
+                        json_performers_results= gr.Json(label="Performers results")
+                with gr.Row():
+                    with gr.Column():
+                        gallery_search_performers= gr.Gallery(label='Performers', allow_preview=False, object_fit='contain', columns=4)                    
                     
-    btn_search_performer_name.click(search_performer_by_name, inputs=[txt_search_performer_name], outputs=[performer_gallery, performers_results])
-    txt_search_performer_name.submit(search_performer_by_name, inputs=[txt_search_performer_name], outputs=[performer_gallery, performers_results])
-    performer_gallery.select(performer_gallery_select, performer_gallery, None)
-    btn_load_performer_id.click(display_performer, inputs=[txt_performer_id], outputs=[txt_current_performer_id, img_performer, txt_performer_name, txt_performer_stashes, performer_json, performer_stash_images])
-    txt_performer_id.submit(display_performer, inputs=[txt_performer_id], outputs=[txt_current_performer_id, img_performer, txt_performer_name, txt_performer_stashes, performer_json, performer_stash_images])
+    btn_search_performer_name.click(search_performer_by_name, inputs=[txt_search_performer_name], outputs=[gallery_search_performers, json_performers_results, state_search_performer])
+    txt_search_performer_name.submit(search_performer_by_name, inputs=[txt_search_performer_name], outputs=[gallery_search_performers, json_performers_results, state_search_performer])
+    gallery_search_performers.select(performer_gallery_select, inputs=[gallery_search_performers, state_search_performer], outputs=[txt_performer_id, main_tab]).then(
+        display_performer, inputs=[txt_performer_id], outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, performer_json, performer_stash_images]
+    )
+    btn_load_performer_id.click(display_performer, inputs=[txt_performer_id], outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, performer_json, performer_stash_images])
+    txt_performer_id.submit(display_performer, inputs=[txt_performer_id], outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, performer_json, performer_stash_images])
     btn_download_images_from_stash_box.click(download_images_from_stash_box, inputs=[txt_current_performer_id], outputs=[performer_stash_images])
+    performer_stash_images.select(stash_image_selection, inputs=[performer_stash_images], outputs=[img_performer, plot_analysis])
