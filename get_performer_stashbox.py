@@ -49,6 +49,9 @@ def main():
     base_dir = pathlib.Path(__file__).parent.resolve()
     
     logger.info(f"Stash config file : {args.stash_config_file.resolve()}")
+    if not args.stash_config_file.exists():
+        logger.critical(f"Config file {args.stash_config_file.resolve()} does not exists")
+        return 1
     with args.stash_config_file.open('r') as f:
         stash_config= yaml.load(f, Loader=yaml.FullLoader)
     stash_boxes=stash_config.get('stash_boxes', [{}])
