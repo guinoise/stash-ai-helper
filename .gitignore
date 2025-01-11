@@ -5,6 +5,8 @@ stash-ai.sqlite3
 stash-ai.sqlite3.bk
 config.json
 debug.json
+local_assets/*
+!local_assets/README.md
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

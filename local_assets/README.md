@@ -1,0 +1,1 @@
+Folder for local assets including stash boxes images and ai generated content

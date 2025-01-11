@@ -22,9 +22,9 @@ if os.path.exists("./README.md"):
 init_engine()
 
 with gr.Blocks(css=css, title="Stash AI", theme=gr.themes.Default()) as demo:
+    stash_performers_tab()
     with gr.Tab("Readme"):
         gr.Markdown(README)
-    stash_performers_tab()
     config_tab(dev_mode=True)
     dev_tab()
 

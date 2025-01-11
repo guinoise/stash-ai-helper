@@ -6,7 +6,8 @@ from dataclasses import dataclass
 import json
 import gradio as gr
 from stashapi.stashapp import StashInterface
-from typing import Dict
+from typing import Dict, List
+from stash_ai.model import StashBox
 
 @dataclass
 class Config:
@@ -17,9 +18,11 @@ class Config:
     dev_mode: bool= False
     stash_interface: StashInterface= None
     stash_configuration: Dict= None
-
+    stash_boxes: List[StashBox]= None
+    data_dir: pathlib.Path= pathlib.Path(__file__).parent.parent.joinpath('local_assets')
 config_file= pathlib.Path('config.json')
 config= Config()
+
 
 def connect_to_stash():
     logger.info("Connecting to stash")
@@ -32,7 +35,9 @@ def connect_to_stash():
             "logger": logger
         })
         config.stash_configuration= config.stash_interface.get_configuration()
-        gr.Info(f"Connected to stash", duration=1)
+        gr.Info(f"Connected to stash", duration=1)  
+        from utils.stashbox import init_stashboxes
+        init_stashboxes()                             
     except Exception as e:
         config.stash_interface= None
         logger.error(f"Error connecting to stash : {e!s}")
