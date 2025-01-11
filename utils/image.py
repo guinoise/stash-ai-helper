@@ -11,9 +11,9 @@ def download_performer_image(url: str, performer: Performer) -> PerformerImage:
         r= requests.get(url, stream=True)
         if r.status_code == 200:
             img= Image.open(io.BytesIO(r.content))
-            pImg= copy.deepcopy(img)
-            pImg.__class__= PerformerImage
-            PerformerImage.__init__(img, performer)
+            # pImg= copy.deepcopy(img)
+            # pImg.__class__= PerformerImage
+            # PerformerImage.__init__(img, performer)
             
             #img.performer= performer
             #pImg= PerformerImage(img, performer)

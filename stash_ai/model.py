@@ -12,6 +12,7 @@ class Performer(BaseModel):
     __tablename__= "performer"
     id: Mapped[int]= mapped_column(primary_key=True)
     name: Mapped[str]
+    stash_image: Mapped[Optional[str]]
     
 class StashBox(BaseModel):
     __tablename__= "stash_box"

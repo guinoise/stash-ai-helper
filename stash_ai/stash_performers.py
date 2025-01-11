@@ -7,6 +7,18 @@ from stash_ai.config import config
 from stash_ai.model import StashBox, Performer
 from stash_ai.db import get_session
 from utils.image import download_performer_image
+from utils.performer import download_performer_image_from_performer_data, get_performer_from_performer_data, load_performer
+
+def display_performer(performer_id: int):
+    logger.info(f"Dispaly performer {performer_id}")
+    performer_image= None
+    with get_session() as session:
+        performer_data= config.stash_interface.find_performer(performer_id)
+        performer: Performer= session.get(Performer, performer_id)
+        if performer is not None and performer_data is not None:
+            performer_image= download_performer_image(performer_data.get('image_path'), performer=performer)
+        
+    return performer_image
 
 def search_performer_by_name(txt_performer_name):
     logger.info(f"Perform search on stash for name {txt_performer_name}")
@@ -24,15 +36,12 @@ def search_performer_by_name(txt_performer_name):
         with get_session() as session:
             for performer_data in performers:
                 logger.info(f"Loading performer id {performer_data.get('id')}")
-                performer: Performer= session.get(Performer, performer_data.get('id'))
-                if performer is None:
-                    performer= Performer(id= performer_data.get('id'), name=performer_data.get('name'))
-                    session.add(performer)
-                img= download_performer_image(performer_data.get('image_path'), performer=performer)
+                performer: Performer= get_performer_from_performer_data(performer_data, session)
+                img= download_performer_image_from_performer_data(performer)
                 if img is None:
                     logger.error(f"Error img is none {performer.id}")
                 else:
-                    performers_images.append((img, performer.name))
+                    performers_images.append((img, f"{performer.name} ({performer.id})"))
             session.commit()
     else:
         gr.Warning("Could not perform a full search.", duration=2)

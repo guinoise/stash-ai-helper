@@ -44,6 +44,7 @@ $COMMENT=""
 Generate revision 
 ```
 alembic revision --autogenerate -m "$COMMENT"
+GC (alembic show head | Select-String -Pattern '^Path: (.*)$' | % {$_.Matches[0].Groups[1].Value})
 ```
 
 Apply to the default database
