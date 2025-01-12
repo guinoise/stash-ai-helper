@@ -10,7 +10,9 @@ from utils.performer import get_performer_stash_image, create_or_update_performe
 from sqlalchemy import select
 from PIL import Image
 
-def download_images_from_stash_box(performer_id):
+FULL_SEARCH_ALLOWED=True
+
+def download_images_from_stash_box(performer_id, state_peformer_stash):
     logger.info(f"Download images from stashbox for performer {performer_id}")
     images= None
     ids= []
@@ -20,12 +22,19 @@ def download_images_from_stash_box(performer_id):
         download_stash_box_images_for_performer(performer, session)
         logger.debug(f"Performer for retrieve {performer}")
         images, ids= get_downloaded_stash_box_images_for_performer(performer, session, return_tuple_ids=True)
-    return [images, ids]
+    state_peformer_stash["image_ids"]= ids
+    if state_peformer_stash.get("current_index") is None or state_peformer_stash.get("current_index") < len(ids):
+        if len(ids) == 0:
+            state_peformer_stash["current_index"]= None
+        else:
+            state_peformer_stash["current_index"]= 0
+    return [images, state_peformer_stash]
         
                     
 
-def display_performer(performer_id: int):
-    logger.info(f"Dispaly performer {performer_id}")
+def display_performer(state_performer_stash, performer_id: int):
+    logger.info(f"display_performer {performer_id}")
+    logger.debug(f"display_performer Current state : {type(state_performer_stash)} : {state_performer_stash}")
     performer_image= None
     performer_name= None
     performer_json= None
@@ -45,8 +54,11 @@ def display_performer(performer_id: int):
             stash_ids+=f"{', ' if stash_ids else ''}{sbi.stash_box.name}: {sbi.stash_id}"
         stash_images, img_ids= get_downloaded_stash_box_images_for_performer(performer, session, return_tuple_ids=True)
         session.commit()
-        
-    return [performer_id, performer_image, performer.name, stash_ids, performer_json, stash_images, img_ids, None]
+    state_performer_stash["image_ids"]= img_ids
+    if state_performer_stash.get("current_index") is None or state_performer_stash.get("current_index") < len(stash_images):
+        state_performer_stash["current_index"]=  None
+    logger.debug(f"End: display_performer Current state : {type(state_performer_stash)} : {state_performer_stash}")        
+    return [performer_id, performer_image, performer.name, stash_ids, performer_json, stash_images, state_performer_stash, None]
     
 
 def search_performer_by_name(txt_performer_name):
@@ -57,7 +69,7 @@ def search_performer_by_name(txt_performer_name):
     performers_ids= []
     if config.stash_interface is None:
         gr.Warning("Not connected to stash")
-    elif txt_performer_name:
+    elif txt_performer_name or FULL_SEARCH_ALLOWED:
         count, performers= config.stash_interface.find_performers(q=txt_performer_name, filter={"per_page": 50}, get_count=True)
         if count > 50:
             gr.Warning(f"Got {count} performers, only 50 first are displayed. Refine your research!")
@@ -80,31 +92,50 @@ def search_performer_by_name(txt_performer_name):
     
     return [performers_images,performers, performers_ids]
 
-def stash_image_selection(gallery, img_ids, evt: gr.SelectData):
-    logger.info(f"Performer stash selection : {gallery} {evt!r}")
-    logger.info(f"You selected {evt.value} at {evt.index} from {evt.target}")
-    if len(img_ids) < evt.index:
-        raise gr.Error("Invalid state could not populate from images. Reload the performer.")
-    logger.info(f"Image id : {img_ids[evt.index]}")
-    img_id= (img_ids[evt.index]["image_id"], img_ids[evt.index]["performer_id"], img_ids[evt.index]["stash_box_id"])
-    logger.debug(f"Image id : {img_id}")
+def deepface_analysis(state_performer_stash):
+    logger.debug(f"deepface_analysis Current state : {type(state_performer_stash)} : {state_performer_stash}")    
+    logger.info(f"deepface_analysis index {state_performer_stash.get("current_index")}")
+    if state_performer_stash.get("current_index") is None:
+        gr.Warning(f"No index selected. Select an image from the stash images.")
+        return [state_performer_stash, None, None]
+    if state_performer_stash.get("image_ids") is None or len(state_performer_stash.get("image_ids")) < state_performer_stash.get("current_index"):
+        gr.Warning(f"Invalid selection. Select an image from the stash images.")
+        return [state_performer_stash, None, None]
+    
+    image_id= state_performer_stash.get("image_ids")[state_performer_stash.get("current_index")]
+    logger.debug(f"Image id (image, performer, stash_box): {image_id}")
     img= None
     with get_session() as session:
-        img_data: PerformerStashBoxImage= session.get(PerformerStashBoxImage, img_id)
-        if img_data is not None:
-            img= Image.open(img_data.get_image_path())
+        img_data: PerformerStashBoxImage= session.get(PerformerStashBoxImage, image_id)
+        if img_data is None:
+            gr.Warning(f"Unable to load the selected image from disk.")
+            return [state_performer_stash, None, None]        
+        img= Image.open(img_data.get_image_path())
+    
+        
+    return [state_performer_stash, img, None]
 
-    return [img, None]
+def stash_image_selection(state_performer_stash, evt: gr.SelectData):
+    logger.info(f"stash_image_selection : Index : {evt.index} Image ids list size : {len(state_performer_stash.get("image_ids", []))}")
+    logger.debug(f"stash_image_selection Current state : {type(state_performer_stash)} : {state_performer_stash}")
+    
+    if len(state_performer_stash.get("image_ids", [])) < evt.index:
+        gr.Warning("**Invalid state could not populate from images. Reload the performer.")
+        return [state_performer_stash]
+    state_performer_stash["current_index"]= evt.index
+    logger.debug(f"end stash_image_selection Current state : {type(state_performer_stash)} : {state_performer_stash}")    
+    return state_performer_stash
 
 def performer_gallery_select(selection, ids, evt: gr.SelectData):
     if evt.index > len(ids):
-        raise gr.Error("State invalid, could not retrieve selected image")
+        gr.Warning("State invalid, could not retrieve selected image")
+        return [ids[evt.index], gr.Tabs(selected=10)]
     logger.info(f"Performer id selected : {ids[evt.index]}")
     return [ids[evt.index], gr.Tabs(selected=10)]
     
 def stash_performers_tab():
     state_search_performer= gr.BrowserState([])
-    state_peformer_stash= gr.BrowserState([])
+    state_peformer_stash= gr.BrowserState({"image_ids": [], "current_index": None})
     with gr.Tab("Performers") as performers_tab:
         with gr.Tabs() as main_tab:
             with gr.TabItem("Performer", id=10):
@@ -127,6 +158,8 @@ def stash_performers_tab():
                             with gr.Group():
                                 txt_performer_stashes= gr.Textbox(label='Stash box', interactive=False)
                                 btn_download_images_from_stash_box= gr.Button(value= 'Download images from stash box', icon='assets/download.png', min_width=60)
+                        with gr.Row():
+                            btn_deepface_analysis= gr.Button(value='Deep face analysis', variant='primary')
                         with gr.Row():
                             with gr.Column():
                                 img_performer= gr.Image()
@@ -162,22 +195,28 @@ def stash_performers_tab():
                                      outputs=[txt_performer_id, main_tab]
                                      ).then(
                                          display_performer, 
-                                         inputs=[txt_performer_id], 
+                                         inputs=[state_peformer_stash, txt_performer_id], 
                                          outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
                                          )
     btn_load_performer_id.click(display_performer, 
-                                inputs=[txt_performer_id], 
+                                inputs=[state_peformer_stash, txt_performer_id], 
                                 outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
                                 )
     txt_performer_id.submit(display_performer, 
-                            inputs=[txt_performer_id], 
+                            inputs=[state_peformer_stash, txt_performer_id], 
                             outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
                             )
     btn_download_images_from_stash_box.click(download_images_from_stash_box, 
-                                             inputs=[txt_current_performer_id], 
+                                             inputs=[state_peformer_stash, txt_current_performer_id], 
                                              outputs=[gallery_performer_stash_images, state_peformer_stash]
                                              )
     gallery_performer_stash_images.select(stash_image_selection, 
-                                  inputs=[gallery_performer_stash_images, state_peformer_stash], 
-                                  outputs=[img_performer, plot_analysis]
-                                  )
+                                  inputs=[state_peformer_stash], 
+                                  outputs=state_peformer_stash
+                                  ).then(deepface_analysis,
+                                         inputs=state_peformer_stash,
+                                         outputs=[state_peformer_stash, img_performer, plot_analysis]
+                                         )
+    btn_deepface_analysis.click(deepface_analysis,
+                                inputs=state_peformer_stash,
+                                outputs=[state_peformer_stash, img_performer, plot_analysis])

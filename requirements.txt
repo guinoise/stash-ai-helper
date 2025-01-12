@@ -7,3 +7,4 @@ opencv-python
 gradio
 pillow
 pip-system-certs
+deepface

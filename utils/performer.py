@@ -6,7 +6,7 @@ from PIL import Image
 import io
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Union, Tuple
 from stash_ai.config import config
 from utils.stashbox import endpoint_to_hash
 from dateutil import parser
@@ -25,8 +25,9 @@ def create_or_update_performer_from_stash(performer_id: int, performer_data: Opt
     logger.info(f"Create or update performer {performer_id} from stash")    
     if performer_data is None:
         performer_data= config.stash_interface.find_performer(performer_id) if config.stash_interface is not None else None
-        
-    performer: Performer= session.get(Performer, performer_data.get('id'))
+    performer: Performer= session.get(Performer, performer_id)
+    if performer is None and performer_data is None:
+        return None
     if performer is None:
         logger.info(f"Create new performer in db {performer_id}")
         performer= Performer(id= performer_data.get('id'), 
@@ -127,7 +128,7 @@ def download_stash_box_images_for_performer(performer: Performer, session: Sessi
                     session.add(img_data)
             session.commit()
 
-def get_downloaded_stash_box_images_for_performer(performer: Performer, session: Session, return_tuple_ids: bool= False) -> List[Image.Image]:
+def get_downloaded_stash_box_images_for_performer(performer: Performer, session: Session, return_tuple_ids: bool= False) -> Union[List[Image.Image], Tuple[List[Image.Image], List[Tuple[str,str,str]]]]:
     logger.info(f"Loading stash box images for performer {performer.name} [{performer.id}]")
     pil_images= []
     ids=[]
@@ -143,7 +144,7 @@ def get_downloaded_stash_box_images_for_performer(performer: Performer, session:
         try:
             img= Image.open(img_data.get_image_path())
             pil_images.append(img)
-            ids.append({"image_id":img_data.image_id, "performer_id": img_data.performer_id, "stash_box_id": img_data.stash_box_id})
+            ids.append((img_data.image_id, img_data.performer_id, img_data.stash_box_id))
         except Exception as e:
             logger.error(f"Error opening image at {img_data.get_image_path().resolve()} : {e!s}")        
     if return_tuple_ids:

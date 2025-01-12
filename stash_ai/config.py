@@ -7,7 +7,6 @@ import json
 import gradio as gr
 from stashapi.stashapp import StashInterface
 from typing import Dict, List
-from stash_ai.model import StashBox
 
 @dataclass
 class Config:
@@ -18,7 +17,7 @@ class Config:
     dev_mode: bool= False
     stash_interface: StashInterface= None
     stash_configuration: Dict= None
-    stash_boxes: List[StashBox]= None
+    stash_boxes: List= None
     data_dir: pathlib.Path= pathlib.Path(__file__).parent.parent.joinpath('local_assets')
 config_file= pathlib.Path('config.json')
 config= Config()
