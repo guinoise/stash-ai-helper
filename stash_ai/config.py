@@ -7,6 +7,7 @@ import json
 import gradio as gr
 from stashapi.stashapp import StashInterface
 from typing import Dict, List
+from urllib.parse import urlunparse
 
 @dataclass
 class Config:
@@ -14,6 +15,7 @@ class Config:
     stash_hostname: str= 'localhost'
     stash_port: int= 9999
     stash_api_key: str= None
+    stash_base_url: str= None
     dev_mode: bool= False
     stash_interface: StashInterface= None
     stash_configuration: Dict= None
@@ -26,6 +28,8 @@ config= Config()
 def connect_to_stash():
     logger.info("Connecting to stash")
     try:
+        config.stash_base_url= urlunparse((config.stash_schema, f"{config.stash_hostname}:{config.stash_port}", "/", "", "", ""))
+        logger.debug(f"connect_to_stash config.stash_base_url: {config.stash_base_url}")
         config.stash_interface = StashInterface({
             "scheme": config.stash_schema,
             "host": config.stash_hostname,
