@@ -8,3 +8,13 @@ gradio
 pillow
 pip-system-certs
 deepface
+tf-keras
+matplotlib
+imagehash
+
+cmake #required for dlib
+dlib
+mediapipe
+ultralytics
+
+jupyterlab

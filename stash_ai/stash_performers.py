@@ -9,6 +9,9 @@ from stash_ai.db import get_session
 from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer
 from sqlalchemy import select
 from PIL import Image
+from deepface import DeepFace
+import pandas as pd
+import numpy as np
 
 FULL_SEARCH_ALLOWED=True
 
@@ -56,7 +59,10 @@ def display_performer(state_performer_stash, performer_id: int):
         session.commit()
     state_performer_stash["image_ids"]= img_ids
     if state_performer_stash.get("current_index") is None or state_performer_stash.get("current_index") < len(stash_images):
-        state_performer_stash["current_index"]=  None
+        if len(img_ids) > 0:
+            state_performer_stash["current_index"]= 0
+        else:
+            state_performer_stash["current_index"]=  None
     logger.debug(f"End: display_performer Current state : {type(state_performer_stash)} : {state_performer_stash}")        
     return [performer_id, performer_image, performer.name, stash_ids, performer_json, stash_images, state_performer_stash, None]
     
@@ -92,15 +98,23 @@ def search_performer_by_name(txt_performer_name):
     
     return [performers_images,performers, performers_ids]
 
-def deepface_analysis(state_performer_stash):
+def deepface_analysis(state_performer_stash, radio_deepface_analysis: str):
     logger.debug(f"deepface_analysis Current state : {type(state_performer_stash)} : {state_performer_stash}")    
+    #TODO Find why it become a list
+    if isinstance(state_performer_stash, list):
+        state_performer_stash= state_performer_stash[0]
     logger.info(f"deepface_analysis index {state_performer_stash.get("current_index")}")
-    if state_performer_stash.get("current_index") is None:
-        gr.Warning(f"No index selected. Select an image from the stash images.")
-        return [state_performer_stash, None, None]
     if state_performer_stash.get("image_ids") is None or len(state_performer_stash.get("image_ids")) < state_performer_stash.get("current_index"):
         gr.Warning(f"Invalid selection. Select an image from the stash images.")
-        return [state_performer_stash, None, None]
+        return [state_performer_stash, None, None, None]
+
+    if state_performer_stash.get("current_index") is None:
+        if len(state_performer_stash.get("image_ids")) > 0:
+            gr.Warning(f"No index selected. Using first image")
+            state_performer_stash["current_index"]= 0
+        else:
+            gr.Warning(f"No index selected. Select an image from the stash images.")
+            return [state_performer_stash, None, None, None]
     
     image_id= state_performer_stash.get("image_ids")[state_performer_stash.get("current_index")]
     logger.debug(f"Image id (image, performer, stash_box): {image_id}")
@@ -111,9 +125,14 @@ def deepface_analysis(state_performer_stash):
             gr.Warning(f"Unable to load the selected image from disk.")
             return [state_performer_stash, None, None]        
         img= Image.open(img_data.get_image_path())
-    
-        
-    return [state_performer_stash, img, None]
+    analysis= DeepFace.analyze(np.array(img), actions=['age', 'gender', 'race', 'emotion'], enforce_detection=False)    
+    # convert the resulting dictionary to a DataFrame
+    df = pd.DataFrame(analysis[0])
+    sub_df= df[radio_deepface_analysis.lower()]
+    plot_data= sub_df.plot(kind='line', figsize = (9, 5), title = radio_deepface_analysis.capitalize(), legend=True)
+    plot= plot_data.get_figure()
+
+    return [state_performer_stash, img, plot, df]
 
 def stash_image_selection(state_performer_stash, evt: gr.SelectData):
     logger.info(f"stash_image_selection : Index : {evt.index} Image ids list size : {len(state_performer_stash.get("image_ids", []))}")
@@ -124,7 +143,7 @@ def stash_image_selection(state_performer_stash, evt: gr.SelectData):
         return [state_performer_stash]
     state_performer_stash["current_index"]= evt.index
     logger.debug(f"end stash_image_selection Current state : {type(state_performer_stash)} : {state_performer_stash}")    
-    return state_performer_stash
+    return [state_performer_stash]
 
 def performer_gallery_select(ids, evt: gr.SelectData):
     if evt.index > len(ids):
@@ -159,12 +178,20 @@ def stash_performers_tab():
                                 txt_performer_stashes= gr.Textbox(label='Stash box', interactive=False)
                                 btn_download_images_from_stash_box= gr.Button(value= 'Download images from stash box', icon='assets/download.png', min_width=60)
                         with gr.Row():
+                            radio_deepface_analysis= gr.Radio(choices=["gender", "race", "emotion"],
+                                                                                                value="gender",
+                                                                                                label="Attributes",
+                                                                                                info="Select an Attribute to Analyze")
+
                             btn_deepface_analysis= gr.Button(value='Deep face analysis', variant='primary')
                         with gr.Row():
                             with gr.Column():
                                 img_performer= gr.Image()
-                            with gr.Column():
-                                plot_analysis= gr.Plot()
+                            with gr.Column(scale=3):
+                                plot_analysis= gr.Plot(label="Analysis Output", show_label=True)
+                with gr.Row():
+                    with gr.Column():
+                        dataframe_analysis= gr.DataFrame()
                         
 
             with gr.TabItem("Search", id=11):
@@ -193,30 +220,34 @@ def stash_performers_tab():
     gallery_search_performers.select(performer_gallery_select, 
                                      inputs=[state_search_performer], 
                                      outputs=[txt_performer_id, main_tab]
-                                     ).then(
-                                         display_performer, 
-                                         inputs=[state_peformer_stash, txt_performer_id], 
-                                         outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
-                                         )
+                                     )
     btn_load_performer_id.click(display_performer, 
                                 inputs=[state_peformer_stash, txt_performer_id], 
                                 outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
                                 )
+    # .then(deepface_analysis,
+    #                                      inputs=[state_peformer_stash, radio_deepface_analysis],
+    #                                      outputs=[state_peformer_stash, img_performer, plot_analysis, dataframe_analysis]
+    #                                      )
     txt_performer_id.submit(display_performer, 
                             inputs=[state_peformer_stash, txt_performer_id], 
                             outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
                             )
+    # .then(deepface_analysis,
+    #                                      inputs=[state_peformer_stash, radio_deepface_analysis],
+    #                                      outputs=[state_peformer_stash, img_performer, plot_analysis, dataframe_analysis]
+    #                                      )
     btn_download_images_from_stash_box.click(download_images_from_stash_box, 
-                                             inputs=[state_peformer_stash, txt_current_performer_id], 
+                                             inputs=[txt_current_performer_id, state_peformer_stash], 
                                              outputs=[gallery_performer_stash_images, state_peformer_stash]
                                              )
     gallery_performer_stash_images.select(stash_image_selection, 
                                   inputs=[state_peformer_stash], 
-                                  outputs=state_peformer_stash
+                                  outputs=[state_peformer_stash]
                                   ).then(deepface_analysis,
-                                         inputs=state_peformer_stash,
-                                         outputs=[state_peformer_stash, img_performer, plot_analysis]
+                                         inputs=[state_peformer_stash, radio_deepface_analysis],
+                                         outputs=[state_peformer_stash, img_performer, plot_analysis, dataframe_analysis]
                                          )
     btn_deepface_analysis.click(deepface_analysis,
-                                inputs=state_peformer_stash,
-                                outputs=[state_peformer_stash, img_performer, plot_analysis])
+                                inputs=[state_peformer_stash, radio_deepface_analysis],
+                                outputs=[state_peformer_stash, img_performer, plot_analysis, dataframe_analysis])
