@@ -126,7 +126,7 @@ def stash_image_selection(state_performer_stash, evt: gr.SelectData):
     logger.debug(f"end stash_image_selection Current state : {type(state_performer_stash)} : {state_performer_stash}")    
     return state_performer_stash
 
-def performer_gallery_select(selection, ids, evt: gr.SelectData):
+def performer_gallery_select(ids, evt: gr.SelectData):
     if evt.index > len(ids):
         gr.Warning("State invalid, could not retrieve selected image")
         return [ids[evt.index], gr.Tabs(selected=10)]
@@ -191,7 +191,7 @@ def stash_performers_tab():
                                      outputs=[gallery_search_performers, json_performers_results, state_search_performer]
                                      )
     gallery_search_performers.select(performer_gallery_select, 
-                                     inputs=[gallery_search_performers, state_search_performer], 
+                                     inputs=[state_search_performer], 
                                      outputs=[txt_performer_id, main_tab]
                                      ).then(
                                          display_performer, 
