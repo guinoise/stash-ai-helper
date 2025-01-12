@@ -60,3 +60,4 @@ This file is NOT commited in the git repository but it contains the passwords fo
 # TODO
 - [X] Alembic init
 - [ ] Fix the logger format
+- [ ] Fix stash image url to store only the location on the stash box without base url. Tempory fix implemented performer.get_performer_stash_image

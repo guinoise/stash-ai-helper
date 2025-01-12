@@ -2,6 +2,7 @@ from utils.custom_logging import get_logger
 logger= get_logger("utils.image")
 from stash_ai.model import Performer, PerformerStashBox, PerformerStashBoxImage
 import requests
+from urllib.parse import urlparse
 from PIL import Image
 import io
 from sqlalchemy.orm import Session
@@ -65,7 +66,11 @@ def create_or_update_performer_from_stash(performer_id: int, performer_data: Opt
 def get_performer_stash_image(performer: Performer) -> Image.Image:
     logger.info(f"Downloading image for performer {performer}")
     try:
-        r= requests.get(performer.stash_image, stream=True)
+        #TODO correct fix, temporary patch implemented
+        parts= urlparse(performer.stash_image)
+        new_url= parts._replace(scheme= config.stash_schema, netloc= f"{config.stash_hostname}:{config.stash_port}").geturl()
+        logger.debug(f"Original url : {performer.stash_image} new: {new_url}")
+        r= requests.get(new_url, stream=True)
         if r.status_code == 200:
             img= Image.open(io.BytesIO(r.content))
             return img
