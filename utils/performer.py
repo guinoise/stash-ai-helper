@@ -1,5 +1,5 @@
 from utils.custom_logging import get_logger
-logger= get_logger("utils.image")
+logger= get_logger("utils.performer")
 from stash_ai.model import Performer, PerformerStashBox, PerformerStashBoxImage
 import requests
 from urllib.parse import urlparse
@@ -13,6 +13,10 @@ from utils.stashbox import endpoint_to_hash
 from dateutil import parser
 from utils.utils import update_object_data
 import json
+
+def get_unknown_performer_image():
+    unknown_performer_img_path= config.base_dir.joinpath('assets/Unknown-performer.png')
+    return Image.open(unknown_performer_img_path)
 
 def load_performer(performer_id: int, session: Session) -> Performer:
     logger.info(f"Load performer {performer_id}")

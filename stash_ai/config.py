@@ -21,6 +21,7 @@ class Config:
     stash_configuration: Dict= None
     stash_boxes: List= None
     data_dir: pathlib.Path= pathlib.Path(__file__).parent.parent.joinpath('local_assets')
+    base_dir: pathlib.Path= pathlib.Path(__file__).parent.parent
 config_file= pathlib.Path('config.json')
 config= Config()
 
