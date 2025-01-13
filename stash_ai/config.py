@@ -90,8 +90,7 @@ def save_config_btn_handler(stash_schema, stash_hostname, stash_port, stash_api_
 def get_config_handler():
     return [config.stash_schema, config.stash_hostname, config.stash_port, config.stash_api_key]
 
-def config_tab(dev_mode:bool = False):
-    config.dev_mode= dev_mode
+def config_tab():
     with gr.Tab("Config") as tab_config:
         if config.dev_mode:
             html_dev= gr.HTML(value="<h1>Developer mode enabled</h1>")

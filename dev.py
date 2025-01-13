@@ -21,14 +21,14 @@ if os.path.exists("./README.md"):
         README = file.read()
         
 init_engine()
-
+config.dev_mode= True
 with gr.Blocks(css=css, title="Stash AI", theme=gr.themes.Default()) as demo:
     with gr.Tabs(elem_id="main_tabs"):
-        #stash_scene_tab()
+        stash_scene_tab()
         with gr.Tab("Readme"):
             gr.Markdown(README)
         stash_performers_tab()
-        config_tab(dev_mode=True)
+        config_tab()
         dev_tab()
 
 if __name__ == "__main__":
