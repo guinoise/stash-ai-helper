@@ -8,10 +8,9 @@ from stash_ai.model import StashBox, Performer, PerformerStashBoxImage
 
 
 def stash_scene_tab():
-    state_search_scene= gr.BrowserState([])
-    state_scene_stash= gr.BrowserState({"scene_ids": [], "current_index": None})
     with gr.Tab("Scenes") as scene_tab:
-        pass
+        state_search_scene= gr.BrowserState([])
+        state_scene_stash= gr.BrowserState({"scene_ids": [], "current_index": None})
         # with gr.Tabs() as main_tab_scene:
         #     with gr.TabItem("Scene", id=20):
         #         with gr.Row():
