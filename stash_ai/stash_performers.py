@@ -9,9 +9,11 @@ from stash_ai.db import get_session
 from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer
 from sqlalchemy import select
 from PIL import Image
-from deepface import DeepFace
 import pandas as pd
 import numpy as np
+
+if gr.NO_RELOAD:
+    from deepface import DeepFace
 
 FULL_SEARCH_ALLOWED=True
 
