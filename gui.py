@@ -4,15 +4,14 @@ logger= get_logger('gui')
 #logger= setup_std_logging()
 import argparse
 import os
-import pathlib
-import json
 from stash_ai.config import config, config_tab
-from stash_ai.db import get_session, init_engine
-# from sdid.db_ops import db_ops_tab
-# from sdid.assets import assets_tab
-# from sdid.datasets import dataset_tab
+from stash_ai.dev import dev_tab
+from stash_ai.stash_performers import stash_performers_tab
+from stash_ai.stash_scenes import stash_scene_tab
+from stash_ai.db import init_engine
        
 def UI(*args, **kwargs):
+    config.dev_mode= False
     css = ""
 
     if os.path.exists("./style.css"):
@@ -30,10 +29,15 @@ def UI(*args, **kwargs):
         theme=gr.themes.Default()
     )
     init_engine()
+
     with interface:
-        with gr.Tab("Readme"):
-            gr.Markdown(README)
-        config_tab()
+        with gr.Tabs(elem_id="main_tabs"):
+            #stash_scene_tab()
+            with gr.Tab("Readme"):
+                gr.Markdown(README)
+            stash_performers_tab()
+            config_tab()
+            #dev_tab()
 
     # Show the interface
     launch_kwargs = {}

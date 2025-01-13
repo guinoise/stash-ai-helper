@@ -4,9 +4,10 @@ logger= get_logger('dev')
 import os
 import gradio as gr
 from stash_ai.config import config, config_tab
-from stash_ai.db import get_session, init_engine
 from stash_ai.dev import dev_tab
 from stash_ai.stash_performers import stash_performers_tab
+from stash_ai.stash_scenes import stash_scene_tab
+from stash_ai.db import init_engine
 
 css = ""
 
@@ -22,11 +23,13 @@ if os.path.exists("./README.md"):
 init_engine()
 
 with gr.Blocks(css=css, title="Stash AI", theme=gr.themes.Default()) as demo:
-    stash_performers_tab()
-    with gr.Tab("Readme"):
-        gr.Markdown(README)
-    config_tab(dev_mode=True)
-    dev_tab()
+    with gr.Tabs(elem_id="main_tabs"):
+        #stash_scene_tab()
+        with gr.Tab("Readme"):
+            gr.Markdown(README)
+        stash_performers_tab()
+        config_tab(dev_mode=True)
+        dev_tab()
 
 if __name__ == "__main__":
     demo.launch()
