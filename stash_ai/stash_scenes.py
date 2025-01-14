@@ -7,10 +7,23 @@ from stash_ai.db import get_session
 from stash_ai.model import StashBox, Performer, PerformerStashBoxImage
 from utils.performer import get_performer_stash_image, load_performer, get_unknown_performer_image
 from utils.scene import extract_video_images, analyse_extracted_video
+from utils.scene import ImageAnalysis, Face
 import math
 
 def detect_and_extract_faces(radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, checkbox_dryrun_face_detection, progress=gr.Progress()):
-    return analyse_extracted_video(radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, checkbox_dryrun_face_detection, progress)
+    results= analyse_extracted_video(radio_deepface_detector, number_deepface_extends, checkbox_dryrun_face_detection, progress)
+    logger.debug(f"detect_and_extract_faces {results}")
+    gallery_face_dection= []
+    gallery_sample_faces= []
+    metadata: ImageAnalysis
+    for metadata in results:
+        if not metadata.sample:
+            continue
+        gallery_face_dection.append(metadata.get_numpy())
+        gallery_face_dection.append(metadata.get_numpy_with_overlay(number_deepface_min_confidence))
+        #gallery_sample_faces.extend(metadata.get_faces_numpy(number_deepface_min_confidence))
+    logger.info(f"analyse_extracted_video : Gallery faces : {len(gallery_face_dection)} Sample faces: {len(gallery_sample_faces)}")
+    return [gallery_face_dection, gallery_sample_faces, None]
     #outputs=[gallery_face_dection, gallery_sample_faces, gallery_unique_faces]
 
 #inputs=[text_video_url, number_duration, number_frames_per_second, number_extract_images_per_seconds, number_of_samples],
@@ -109,7 +122,7 @@ def stash_scene_tab():
                             with gr.Row():
                                 with gr.Column(scale=4):
                                     with gr.Row():
-                                        number_extract_images_per_seconds= gr.Number(label='Number of images to extract per seconds', step=0.01, value=1)
+                                        number_extract_images_per_seconds= gr.Number(label='Number of images to extract per seconds', step=0.01, value=0.2)
                                         number_of_samples= gr.Number(label="Number of samples", value=10, precision=0)
                                 with gr.Column():
                                     btn_extract_images= gr.Button(value='Extract images', variant='primary')
@@ -127,7 +140,7 @@ def stash_scene_tab():
                                     with gr.Tab("Samples face detection"):
                                         with gr.Row():
                                             with gr.Column(scale= 1):
-                                                gallery_extracted= gr.Gallery(label='Samples extracted from scene', object_fit='contain', columns=2)
+                                                gallery_extracted= gr.Gallery(label='Samples extracted from scene', object_fit='contain', columns=1)
                                             with gr.Column(scale= 2):
                                                 gallery_face_dection= gr.Gallery(label='Face detection on samples', object_fit='contain', columns=2)
                                     with gr.Tab("Extracted faces"):
