@@ -9,7 +9,8 @@ import pathlib
 import shutil
 from time import sleep
 import logging
-
+import pyAesCrypt
+from datetime import datetime
 database_file= pathlib.Path('stash-ai.sqlite3')
 
 #logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
@@ -120,4 +121,52 @@ def close_db():
     engine.dispose()
     engine= None
     
+def list_backups():
+    backup_files= []
+    for f in config.encrypted_data.glob('*.sqlite3.aes'):
+        backup_files.append((f.name, f"{f.name} ({datetime.fromtimestamp(f.stat().st_birthtime).isoformat()})"))
+    logger.info("Backup files: %s", backup_files)
+    return backup_files
 
+def backup_database(backup_file: str) ->bool:
+    if not config.aes_password:
+        raise gr.Error("AES password not in configuration. Unable to save an encrypted backup.")
+    backup_file= config.encrypted_data.joinpath(f"{backup_file}.aes")
+    if backup_file.exists():
+        gr.Warning("Backup file already exists")
+        return False
+    if engine is not None:
+        close_db()
+    success= False
+    try:       
+        if not config.encrypted_data.exists():
+            config.encrypted_data.mkdir(parents=True)
+        pyAesCrypt.encryptFile(database_file, backup_file, config.aes_password) 
+        success= True
+    except Exception as e:
+        logger.error("Error encrypting a copy of the database: %s", e)
+    return success
+
+def restore_database_backup(backup_filename: str) -> str|None:
+    logger.warning("Restore of backup requested")
+    backup_file= config.encrypted_data.joinpath(backup_filename)
+    database_file_bk= database_file.parent.joinpath(f"{database_file.name}.bk")
+    if not backup_file.is_file():
+        logger.error(f"Backup file {backup_file.resolve()} NOT FOUND")
+        return False
+    error_message= None
+    try:
+        close_db()
+        if database_file_bk.exists():
+            database_file_bk.unlink()
+        logger.warning(f"Move current database to {database_file_bk.resolve()}")
+        shutil.move(str(database_file.resolve()), str(database_file_bk.resolve()))
+        logger.warning("Decrypting backup file")
+        pyAesCrypt.decryptFile(backup_file, database_file, config.aes_password)
+    except Exception as e:
+        error_message= f"Error restoring a copy of the database: {e!s}"
+        logger.error(error_message)
+        if not database_file.is_file() and database_file_bk.is_file():
+            logger.warning("Restoring old db from bk file")
+            shutil.copy(str(database_file_bk.resolve()), str(database_file.resolve()))
+    return error_message

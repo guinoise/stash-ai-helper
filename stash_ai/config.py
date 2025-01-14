@@ -22,9 +22,46 @@ class Config:
     stash_boxes: List= None
     data_dir: pathlib.Path= pathlib.Path(__file__).parent.parent.joinpath('local_assets')
     base_dir: pathlib.Path= pathlib.Path(__file__).parent.parent
+    encrypted_data: pathlib.Path= pathlib.Path('encrypted_data') 
+    aes_password: str= ''
+   
 config_file= pathlib.Path('config.json')
 config= Config()
 
+def refresh_backups_list():
+    from stash_ai.db import list_backups    
+    backups= list_backups()
+    choices= ['-- MAKE A SELECTION --']
+    logger.debug(f"refresh_backups_list {backups}")
+    for index, name in backups:
+        choices.append(name)
+    logger.debug(f"refresh_backups_list {choices}")    
+    return gr.Dropdown(choices=choices, value=choices[0])
+
+def backup_button_handler(backup_name: str):
+    from stash_ai.db import backup_database
+    if not backup_name or '.' in backup_name:
+        raise gr.Error(f'Backup name {backup_name} must not contain . (dot) character')       
+    # if not backup_name.endswith('.sqlite3'):
+    #     raise gr.Error(f'Backup name {backup_name} must end with .sqlite3')
+    if backup_database(backup_file=f"{backup_name}.sqlite3"):
+        gr.Info('Backup completed')
+    else:
+        gr.Warning('Backup failed')
+    return refresh_backups_list()
+
+def restore_backup_button_handler(backup_index: int):
+    from stash_ai.db import restore_database_backup, list_backups
+    logger.debug(f"restore_backup_button_handler value: {backup_index} ({type(backup_index)}")
+    if not backup_index:
+        raise gr.Error('Select a backup file')
+    backup_name= list_backups()[backup_index-1][0]
+    gr.Warning(f"Restoring {backup_name}")
+    err_message= restore_database_backup(backup_filename=backup_name)
+    if  err_message is None:
+        gr.Warning('Restore complete')
+    else:
+        raise gr.Error(f'Restore failed: {err_message}') 
 
 def connect_to_stash():
     logger.info("Connecting to stash")
@@ -61,6 +98,7 @@ def load_config():
     config.stash_hostname= conf.get('stash_hostname', 'localhost')
     config.stash_port= conf.get('stash_port', 9999)
     config.stash_api_key= conf.get('stash_api_key', None)
+    config.aes_password= conf.get('aes_password', '')    
     connect_to_stash()
     
 def save_config():
@@ -69,7 +107,8 @@ def save_config():
         'stash_schema': config.stash_schema,
         'stash_hostname': config.stash_hostname,
         'stash_port': config.stash_port,
-        'stash_api_key': config.stash_api_key
+        'stash_api_key': config.stash_api_key,
+        'aes_password': config.aes_password
     }
     try:
         with open(config_file, 'w') as file:
@@ -79,17 +118,18 @@ def save_config():
     logger.debug("Saved config: %r", conf)    
     connect_to_stash()
 
-def save_config_btn_handler(stash_schema, stash_hostname, stash_port, stash_api_key):
+def save_config_btn_handler(stash_schema, stash_hostname, stash_port, stash_api_key, aes_password):
     logger.info("Save config handler")
     config.stash_schema= stash_schema
     config.stash_hostname= stash_hostname
     config.stash_port= stash_port
     config.stash_api_key= stash_api_key
+    config.aes_password= aes_password
     save_config()
-    return [config.stash_schema, config.stash_hostname, config.stash_port, stash_api_key]
+    return [config.stash_schema, config.stash_hostname, config.stash_port, stash_api_key, config.aes_password]
 
 def get_config_handler():
-    return [config.stash_schema, config.stash_hostname, config.stash_port, config.stash_api_key]
+    return [config.stash_schema, config.stash_hostname, config.stash_port, config.stash_api_key, config.aes_password]
 
 def config_tab():
     with gr.Tab("Config") as tab_config:
@@ -113,10 +153,40 @@ def config_tab():
             label='Stash server API key (empty for unsecure server)',
             elem_id='stash_api_key'
         )
+        with gr.Group():
+            txt_aes_password= gr.Textbox(
+                type='password',
+                label='AES file encryption password',
+                elem_id='aes_password'
+            )
+            chk_show= gr.Checkbox(value=False, label="Show password")             
         btn_save_config= gr.Button(value='Save config', variant='primary')
-        btn_save_config.click(save_config_btn_handler, inputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key], outputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key])
         btn_reload_stash_config= gr.Button(value="Reload stash configuration", variant='huggingface')
-        btn_reload_stash_config.click(connect_to_stash)
+        with gr.Accordion("Backup database", open=False):
+            with gr.Group():
+                txt_filename= gr.Textbox(value='', label='Backup name (no dots)')
+                btn_backup= gr.Button(value='Backup', variant='primary')
+        with gr.Accordion("Restore database", open=False):
+            with gr.Group():
+                with gr.Row():
+#                    dd_db_backups= gr.Dropdown(choices=['-- NOT LOADED --'], label='Database backups', type='index', value=0)
+                    dd_db_backups= refresh_backups_list()
+                    dd_db_backups.label='Database backups'
+                    dd_db_backups.type= 'index'
+                    btn_refresh_backups= gr.Button(value='🔄', elem_classes="tool")
+                with gr.Row():
+                    btn_restore_backup= gr.Button(value='Restore backup', variant='stop')
+    def set_password_visibility(visible):
+        if visible:
+            type='text'
+        else:
+            type='password'
+        return gr.Textbox(type=type)
     tab_config.select(get_config_handler, None, outputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key])
-
+    btn_save_config.click(save_config_btn_handler, inputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key, txt_aes_password], outputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key, txt_aes_password])
+    btn_reload_stash_config.click(connect_to_stash)
+    btn_backup.click(backup_button_handler, txt_filename, dd_db_backups)
+    chk_show.change(set_password_visibility, [chk_show], [txt_aes_password])
+    btn_refresh_backups.click(refresh_backups_list, None, [dd_db_backups])
+    btn_restore_backup.click(restore_backup_button_handler, dd_db_backups, None)
 load_config()
