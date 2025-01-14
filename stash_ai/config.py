@@ -36,7 +36,7 @@ def refresh_backups_list():
     for index, name in backups:
         choices.append(name)
     logger.debug(f"refresh_backups_list {choices}")    
-    return gr.Dropdown(choices=choices, value=choices[0])
+    return gr.Dropdown(choices=choices, value=choices[0], type='index')
 
 def backup_button_handler(backup_name: str):
     from stash_ai.db import backup_database
@@ -171,7 +171,6 @@ def config_tab():
 #                    dd_db_backups= gr.Dropdown(choices=['-- NOT LOADED --'], label='Database backups', type='index', value=0)
                     dd_db_backups= refresh_backups_list()
                     dd_db_backups.label='Database backups'
-                    dd_db_backups.type= 'index'
                     btn_refresh_backups= gr.Button(value='🔄', elem_classes="tool")
                 with gr.Row():
                     btn_restore_backup= gr.Button(value='Restore backup', variant='stop')
