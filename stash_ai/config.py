@@ -162,10 +162,9 @@ def config_tab():
             chk_show= gr.Checkbox(value=False, label="Show password")             
         btn_save_config= gr.Button(value='Save config', variant='primary')
         btn_reload_stash_config= gr.Button(value="Reload stash configuration", variant='huggingface')
-        with gr.Accordion("Backup database", open=False):
-            with gr.Group():
-                txt_filename= gr.Textbox(value='', label='Backup name (no dots)')
-                btn_backup= gr.Button(value='Backup', variant='primary')
+        with gr.Group():
+            txt_filename= gr.Textbox(value='', label='Backup database', info='Backup name (no dots)')
+            btn_backup= gr.Button(value='Backup', variant='primary')
         with gr.Accordion("Restore database", open=False):
             with gr.Group():
                 with gr.Row():
