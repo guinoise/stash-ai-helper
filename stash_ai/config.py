@@ -188,4 +188,3 @@ def config_tab():
     chk_show.change(set_password_visibility, [chk_show], [txt_aes_password])
     btn_refresh_backups.click(refresh_backups_list, None, [dd_db_backups])
     btn_restore_backup.click(restore_backup_button_handler, dd_db_backups, None)
-load_config()

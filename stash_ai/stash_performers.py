@@ -56,7 +56,7 @@ def display_performer(state_performer_stash, performer_id: int):
             raise gr.Error(f"Unable to load perfomer {performer_id}")
         performer_image= get_performer_stash_image(performer)
         for sbi in performer.stash_boxes_id:
-            stash_ids+=f"{', ' if stash_ids else ''}{sbi.stash_box.name}: {sbi.stash_id}"
+            stash_ids+=f"{', ' if stash_ids else ''}{sbi.stash_box.name if sbi.stash_box else ''}: {sbi.stash_id}"
         stash_images, img_ids= get_downloaded_stash_box_images_for_performer(performer, session, return_tuple_ids=True)
         session.commit()
     state_performer_stash["image_ids"]= img_ids

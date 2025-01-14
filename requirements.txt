@@ -11,6 +11,7 @@ deepface
 tf-keras
 matplotlib
 imagehash
+pyAesCrypt
 
 cmake #required for dlib
 dlib
@@ -18,3 +19,4 @@ mediapipe
 ultralytics
 
 jupyterlab
+ipywidgets

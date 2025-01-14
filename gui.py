@@ -4,13 +4,14 @@ logger= get_logger('gui')
 #logger= setup_std_logging()
 import argparse
 import os
-from stash_ai.config import config, config_tab
+from stash_ai.config import config, config_tab, load_config
 from stash_ai.dev import dev_tab
 from stash_ai.stash_performers import stash_performers_tab
 from stash_ai.stash_scenes import stash_scene_tab
 from stash_ai.db import init_engine
        
 def UI(*args, **kwargs):
+    load_config()
     config.dev_mode= False
     css = ""
 
