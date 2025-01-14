@@ -49,11 +49,13 @@ def create_or_update_performer_from_stash(performer_id: int, performer_data: Opt
             logger.debug(f"Performer {performer_id} Stash id {stash_id}")
             stash_box_id= endpoint_to_hash(stash_id.get('endpoint'))
             for sbi in performer.stash_boxes_id:
-                if sbi.stash_box.id == stash_box_id:
+                if sbi.stash_box_id == stash_box_id:
                     sbi.stash_id= stash_id.get('stash_id')
                     break
             else:
-                performer.stash_boxes_id.append(PerformerStashBox(performer_id=performer_id, stash_box_id= stash_box_id, stash_id= stash_id.get('stash_id')))
+                sbi= PerformerStashBox(performer_id=performer_id, stash_box_id= stash_box_id, stash_id= stash_id.get('stash_id'))
+                performer.stash_boxes_id.append(sbi)
+                session.add(sbi)
             stash_ids.append(f"{stash_box_id}_{stash_id.get('stash_id')}")
         stash_ids_to_remove= []
         for s in performer.stash_boxes_id:
