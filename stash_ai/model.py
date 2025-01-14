@@ -8,7 +8,7 @@ from PIL import Image
 from datetime import datetime
 from stash_ai.config import config
 import pathlib
-
+import math
 class BaseModel(DeclarativeBase):
     pass
 
@@ -87,4 +87,70 @@ class StashBox(BaseModel):
 
     def __repr__(self):
         return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} Name: {self.name} Endpoint: {self.endpoint} Api Key : {self.api_key})"
+
+performers_scene = Table(
+    "performers_scenes",
+    BaseModel.metadata,
+    Column("performer_id", ForeignKey("performer.id"), primary_key=True),
+    Column("scene_id", ForeignKey("scene.id"), primary_key=True),
+)
   
+class Scene(BaseModel):
+    __tablename__= "scene"
+    id: Mapped[int]= mapped_column(primary_key=True)
+    stash_updated_at: Mapped[Optional[datetime]]    
+    title: Mapped[Optional[str]]
+    details: Mapped[Optional[str]]
+    url: Mapped[str]
+    local_file_name: Mapped[str]
+    video_codec: Mapped[str]
+    width: Mapped[int]
+    height: Mapped[int]
+    fps: Mapped[float]
+    duration: Mapped[float]
+    downscale: Mapped[Optional[int]]
+    downscale_width: Mapped[Optional[int]]
+    downscale_height: Mapped[Optional[int]]
+    relative_extract_dir: Mapped[Optional[str]]
+    relative_downscale_extract_dir: Mapped[Optional[str]]
+    relative_extract_face_dir: Mapped[Optional[str]]
+    relative_downscale_extract_face_dir: Mapped[Optional[str]] 
+    hash_tolerance: Mapped[Optional[int]]
+    nb_images: Mapped[Optional[int]]
+    extraction_time: Mapped[Optional[float]]
+    face_detector: Mapped[Optional[str]]
+    extends_face_detection: Mapped[Optional[float]]
+    nb_faces: Mapped[Optional[int]]    
+    performers: Mapped[List[Performer]]= relationship(secondary=performers_scene)
+
+    def number_of_frames(self) -> int:
+        if self.fps is None or self.duration is None:
+            return 0
+        return math.ceil(self.fps * self.duration)
+    def get_extract_dir(self) -> pathlib.Path:
+        if self.relative_extract_dir is None:
+            return None
+        return config.data_dir.joinpath(self.relative_extract_dir)
+
+    def get_downscale_extract_dir(self) -> pathlib.Path:
+        if self.relative_downscale_extract_dir is None:
+            return None
+        return config.data_dir.joinpath(self.relative_downscale_extract_dir)
+
+    def get_extract_face_dir(self) -> pathlib.Path:
+        if self.relative_extract_face_dir is None:
+            return None
+        return config.data_dir.joinpath(self.relative_extract_face_dir)
+
+    def get_dowscale_extract_face_dir(self) -> pathlib.Path:
+        if self.relative_downscale_extract_face_dir is None:
+            return None
+        return config.data_dir.joinpath(self.relative_downscale_extract_face_dir)
+
+    def get_url(self) -> str|None:
+        if self.url is None:
+            return None
+        return f"{config.stash_base_url}{self.url}"
+
+    def __repr__(self):
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} Updated: {self.stash_updated_at} Title: {self.title} Url: {self.url} Codec: {self.video_codec} Size: {self.width}x{self.height} Downscale : {self.downscale} ({self.downscale_width}x{self.downscale_height}) Nb Images: {self.nb_images} Faces: {self.nb_faces} Performers: {self.performers})"

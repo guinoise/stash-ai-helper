@@ -33,10 +33,10 @@ def UI(*args, **kwargs):
 
     with interface:
         with gr.Tabs(elem_id="main_tabs"):
-            #stash_scene_tab()
             with gr.Tab("Readme"):
                 gr.Markdown(README)
             stash_performers_tab()
+            stash_scene_tab()
             config_tab()
             #dev_tab()
 

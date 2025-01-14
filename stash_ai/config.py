@@ -66,7 +66,7 @@ def restore_backup_button_handler(backup_index: int):
 def connect_to_stash():
     logger.info("Connecting to stash")
     try:
-        config.stash_base_url= urlunparse((config.stash_schema, f"{config.stash_hostname}:{config.stash_port}", "/", "", "", ""))
+        config.stash_base_url= urlunparse((config.stash_schema, f"{config.stash_hostname}:{config.stash_port}", "", "", "", ""))
         logger.debug(f"connect_to_stash config.stash_base_url: {config.stash_base_url}")
         config.stash_interface = StashInterface({
             "scheme": config.stash_schema,

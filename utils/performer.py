@@ -39,7 +39,7 @@ def create_or_update_performer_from_stash(performer_id: int, performer_data: Opt
                              name=performer_data.get('name'), 
                              stash_image= performer_data.get('image_path')
                              )
-    stash_udpated_at= parser.parse(performer_data.get('updated_at')).replace(tzinfo=None)    
+    stash_udpated_at= parser.parse(performer_data.get('updated_at', '1970-01-01')).replace(tzinfo=None)    
     if performer.stash_updated_at is None or performer.stash_updated_at < stash_udpated_at:
         logger.info(f"Update performer {performer_id} fields with stash data")
         performer.name= performer_data.get('name')
