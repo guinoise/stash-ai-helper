@@ -6,8 +6,8 @@ import gradio as gr
 from stash_ai.config import config
 from stash_ai.model import StashBox, Performer, PerformerStashBoxImage
 from stash_ai.db import get_session
-from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer
-from sqlalchemy import select
+from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer, update_all_performers
+from utils.performer import download_all_stash_images
 from PIL import Image
 import pandas as pd
 import numpy as np
@@ -132,10 +132,10 @@ def deepface_analysis(performer_id, state_performer_stash, radio_deepface_detect
     analysis: util_img.ImageAnalysis= util_img.image_analysis(img, radio_deepface_detector, number_deepface_extends)
     faces= []
     face: util_img.Face
-    for face, face_im in analysis.get_faces_pil():
+    for face, face_im in analysis.get_faces_pil(number_deepface_min_confidence):
         faces.append((face_im, f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
         
-    return [state_performer_stash, analysis.get_pil_image(), analysis.get_numpy_with_overlay(), faces]
+    return [state_performer_stash, analysis.get_pil_image(), analysis.get_numpy_with_overlay(number_deepface_min_confidence), faces]
     #outputs=[state_peformer_stash, img_performer, img_performer_overly, gallery_faces]
 
 def main_image_selection(state_performer_stash, evt: gr.SelectData):
@@ -168,8 +168,22 @@ def stash_performers_tab():
     with gr.Tab("Performers", id="performer_main_tab") as performers_tab:
         state_search_performer= gr.BrowserState([])
         state_peformer_stash= gr.BrowserState({"image_ids": [], "current_index": None})
-        with gr.Tabs(elem_id="performers_tabs") as performers_tabs:
-            with gr.TabItem("Performer", id="performer_stash_tab"):
+        with gr.Tabs(elem_id="performers_tabs") as performers_tabs:                        
+            with gr.Tab("Search", id="performer_search_tab"):
+                with gr.Row():
+                    with gr.Column():
+                        with gr.Group():
+                            with gr.Row():
+                                txt_search_performer_name= gr.Textbox(label='Performer name')
+                                btn_search_performer_name= gr.Button(value='🔎', elem_classes="tool", min_width=10)
+                logger.error(f"TO FIX ALWAYS VISIBLE : {config.dev_mode}")
+                with gr.Row(visible=config.dev_mode):
+                    with gr.Accordion(label="Dev", open=False):
+                        json_performers_results= gr.Json(label="Performers results")
+                with gr.Row():
+                    with gr.Column():
+                        gallery_search_performers= gr.Gallery(label='Performers', allow_preview=False, object_fit='contain', columns=4)                    
+            with gr.Tab("Performer", id="performer_stash_tab"):
                 with gr.Row():
                     with gr.Column():
                         with gr.Group():
@@ -191,7 +205,7 @@ def stash_performers_tab():
                                 btn_download_images_from_stash_box= gr.Button(value= 'Download images from stash box', icon='assets/download.png', min_width=60)
                         with gr.Row():
                             with gr.Column(scale=2):
-                                radio_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib"], value="retinaface")
+                                radio_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib"], value="retinaface", label='Detector')
                             with gr.Column(scale=1):
                                 number_deepface_extends= gr.Number(label= "Extends % face detection", value=0)
                             with gr.Column(scale=1):
@@ -209,24 +223,10 @@ def stash_performers_tab():
                                 img_performer_overly= gr.Image()
                             with gr.Column(scale=1):
                                 gallery_faces= gr.Gallery(label='Face(s)', rows=1)
-                        
-
-            with gr.TabItem("Search", id="performer_search_tab"):
-                with gr.Row():
-                    with gr.Column():
-                        with gr.Group():
-                            with gr.Row():
-                                txt_search_performer_name= gr.Textbox(label='Performer name')
-                                btn_search_performer_name= gr.Button(value='🔎', elem_classes="tool", min_width=10)
-
-                logger.error(f"TO FIX ALWAYS VISIBLE : {config.dev_mode}")
-                with gr.Row(visible=config.dev_mode):
-                    with gr.Accordion(label="Dev", open=False):
-                        json_performers_results= gr.Json(label="Performers results")
-                with gr.Row():
-                    with gr.Column():
-                        gallery_search_performers= gr.Gallery(label='Performers', allow_preview=False, object_fit='contain', columns=4)                    
-                    
+            with gr.Tab("Batch operation", id="performer_batch_tab"):
+                btn_update_downloaded= gr.Button(value='Update all downloaded performers')
+                btn_download_all_stashbox_images= gr.Button(icon='assets/download.png', value='Download all images from stashbox for all performers')                    
+                
         btn_search_performer_name.click(search_performer_by_name, 
                                         inputs=[txt_search_performer_name], 
                                         outputs=[gallery_search_performers, json_performers_results, state_search_performer]
@@ -280,4 +280,6 @@ def stash_performers_tab():
                                     inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence],
                                     outputs=[state_peformer_stash, img_performer, img_performer_overly, gallery_faces]
                                     )
+        btn_update_downloaded.click(update_all_performers, inputs=None, outputs=None)
+        btn_download_all_stashbox_images.click(download_all_stash_images, None, None)
 

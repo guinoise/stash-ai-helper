@@ -14,6 +14,48 @@ from dateutil import parser
 from utils.utils import update_object_data
 import json
 from urllib.parse import urlparse
+from stash_ai.db import get_session
+from tqdm import tqdm
+import gradio as gr
+from utils.image import convert_rgba_to_rgb
+
+def download_all_stash_images(current_session: Session= None, progress=gr.Progress(track_tqdm=True)):
+    logger.info(f"download_all_stash_images")
+    if current_session is None:
+        session= get_session()
+    else:
+        session= current_session
+        
+    statement= select(Performer)
+    for row in tqdm(session.execute(statement).fetchall(), desc="Downloading...", unit='performer'):
+        performer: Performer= row[0]
+        logger.debug(f"download_all_stash_images {performer}")
+        download_stash_box_images_for_performer(performer, session)
+        
+
+    if current_session is None:
+        session.commit()
+
+
+def update_all_performers(current_session: Session= None, progress=gr.Progress(track_tqdm=True)):
+    logger.info(f"update_all_performers")
+    if current_session is None:
+        session= get_session()
+    else:
+        session= current_session
+        
+    statement= select(Performer)
+    ids= []
+    for row in session.execute(statement).fetchall():
+        performer: Performer= row[0]
+        ids.append(performer.id)
+    
+    for id in tqdm(ids, desc='Updating', unit='performer'):
+        create_or_update_performer_from_stash(id, None, session)
+    
+    if current_session is None:
+        session.commit()
+
 
 def get_unknown_performer_image():
     unknown_performer_img_path= config.base_dir.joinpath('assets/Unknown-performer.png')
@@ -95,12 +137,16 @@ def get_performer_stash_image(performer: Performer, force_download=False) -> Ima
         r= requests.get(performer.get_stash_image_url(), stream=True)
         if r.status_code == 200:
             img= Image.open(io.BytesIO(r.content))
+            if img.mode == "RGBA":
+                logger.debug("get_performer_stash_image image has transparency, removing it")
+                img= convert_rgba_to_rgb(img)
             img.save(filepath)
             return img
         else:
             logger.error(f"Unable to download {performer.stash_image}, status code {r.status_code}")
     except Exception as e:
         logger.error(f"Error downloading image {performer.stash_image} for performer {performer.id}: {e!s}")
+        logger.exception(e)
     return None
         
 def download_stash_box_images_for_performer(performer: Performer, session: Session):
@@ -139,16 +185,25 @@ def download_stash_box_images_for_performer(performer: Performer, session: Sessi
                 
                 if not image_path.exists():
                     logger.info(f"Downloading {img_data.url}")
+                    if not image_path.parent.exists():
+                        image_path.parent.mkdir(parents=True)
+                        
                     try:
-                        response= requests.get(img_data.url)
+                        response= requests.get(img_data.url, stream=True)
                         updated= update_object_data(img_data, "last_status_code", response.status_code) or updated
                         if response.ok:
-                            content_type= image_metadata.get('content-type')
+                            content_type= response.headers['content-type']
                             updated= update_object_data(img_data, "content_type", content_type) or updated
-                            with image_path.open('wb') as handler:
-                                handler.write(response.content)                            
                             with image_metadata_path.open('w') as f:
                                 json.dump(image_metadata, f, indent=2)
+                            img= Image.open(io.BytesIO(response.content))
+                            logger.debug(f"File {image_path.name} content type : {content_type} format: {img.format}")
+                            format= img.format
+                            if img.mode == "RGBA":
+                                logger.debug("download_stash_box_images_for_performer image is RGBA, convert to RGB")
+                                img= convert_rgba_to_rgb(img)
+                            img.save(image_path, format=format)                            
+
                     except Exception as e:
                         updated= update_object_data(img_data, "last_status_code", 0) or updated
                         logger.error(f"Error downloading {img_data.url} : {e!s}")

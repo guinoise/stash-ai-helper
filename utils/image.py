@@ -163,6 +163,9 @@ def hashes_are_similar(left_hash, right_hash, tolerance=6):
     """
     return (left_hash - right_hash) <= tolerance    
     
-    
-    
+def convert_rgba_to_rgb(img: Image.Image, background_color= (0,0,0)) -> Image.Image:
+    logger.debug("convert_rgba_to_rgb")
+    background= Image.new("RGB", img.size, background_color)
+    background.paste(img, mask=img.split()[3]) #3 is the alpha channel
+    return background
     

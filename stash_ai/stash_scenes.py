@@ -154,7 +154,7 @@ def stash_scene_tab():
                         with gr.Row():
                             with gr.Column(scale=4):
                                 with gr.Row():
-                                    radio_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "yolov8"], value="yolov8")
+                                    radio_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "yolov8"], value="yolov8", label='Detector')
                                     number_deepface_extends= gr.Number(label= "Extends % face detection", value=0)
                                     number_deepface_min_confidence= gr.Number(value=0.7, maximum=1, step=0.01, label="Minimum confidence")
                             with gr.Column():
