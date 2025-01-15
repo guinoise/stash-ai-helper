@@ -20,6 +20,7 @@ import pathlib
 import imagehash
 from PIL import Image
 from tqdm import tqdm
+import decord as de
 
 def create_or_update_scene_from_stash(scene_id: int, scene_json: Optional[Dict], session: Session) -> Scene:
     logger.info(f"create_or_update_scene_from_stash {scene_id} from stash")    
@@ -94,6 +95,94 @@ def load_scene(scene_id: int, session: Session) -> Scene:
     if scene is None:
         scene= create_or_update_scene_from_stash(scene_id, None, session)
     return scene    
+
+def decord_scene(scene: Scene,hash_tolerance: int= 20, downscale: int= 512, session: Session= None) -> bool:
+    image_hashes= []
+    nb_frames= scene.number_of_frames()
+    logger.info(f"extract_images Scene: {scene.id} FPS: {scene.fps} Hash tolerance {hash_tolerance} Total frames: {nb_frames}")
+    logger.debug(f"extract_images Scene: {scene}")
+
+    if session is None:
+        logger.info(f"extract_images : Opening a session to the DB")
+        local_session= get_session()
+    else:
+        local_session= session
+
+    location= None 
+    start= None   
+    try:
+        extract_directory= scene.get_extract_dir()
+        extract_directory_downscale= scene.get_downscale_extract_dir()
+
+        for d in [extract_directory, extract_directory_downscale]:
+            if d is None:
+                logger.warning("At least one directory is not setted")
+                raise gr.Error("At least one extraction directory is not setted. Unable to extract.")
+            if d.exists():
+                shutil.rmtree(d)
+            d.mkdir(parents=True)
+        
+        scene.nb_images= 0
+        scene.nb_faces= 0
+        scene.downscale= downscale
+        scene.downscale_width= 0
+        scene.downscale_height= 0
+        scene.hash_tolerance= hash_tolerance
+        
+        if scene.local_file_name is not None:
+            local_file= pathlib.Path(scene.local_file_name)
+            if local_file.is_file():
+                location= local_file
+        if location is None and scene.url is not None:
+            location= scene.get_url()
+            
+        
+        if location is None:
+            gr.Warning("Unable to locate the video, could not extract.")
+        else:
+            
+            logger.debug(f"extract_images Open VideoCapture {location}")
+            ctx= de.cpu()
+            videos= [location]
+            vl= de.VideoLoader(videos, ctx, (6, scene.height, scene.width, 3), 1,1,1)
+            frame= 0
+            for batch in tqdm(vl, desc="Extracting...", unit="frame"):
+                for bb in batch:
+                    image= bb.asnumpy()
+                    pImg= Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                    phash= imagehash.phash(pImg)
+                    frame+= 1
+                    if frame % 500 == 0:
+                        logger.debug(f"Image {scene.nb_images} frame {frame} of {nb_frames}")
+                    for other_hash in image_hashes:
+                        if hashes_are_similar(other_hash, phash):
+                            break
+                    else:
+                        image_name= f"{phash}.jpg"
+                        image_path= extract_directory.joinpath(image_name)
+                        pImg.save(image_path)
+                        pImg.thumbnail((downscale, downscale))
+                        image_path= extract_directory_downscale.joinpath(image_name)
+                        pImg.save(image_path)
+                        scene.nb_images+= 1
+                        image_hashes.append(phash)
+                        if scene.nb_images == 1:
+                            scene.downscale_width, scene.downscale_height= pImg.size
+    except Exception as e:
+        logger.error(f"extract_images Error extraction {location} : {e!s}")
+        logger.exception(e)
+    finally:
+        if start is None:
+            scene.extraction_time= None
+        else:
+            duration= (datetime.now() - start)
+            scene.extraction_time = duration.total_seconds()
+            logger.info(f"extract_images Extraction time : {duration}")
+        if session is None:
+            local_session.commit()
+    logger.info(f"extract_images Extracted {scene.nb_images} over {nb_frames} frames")
+    return True
+    
 
 def extract_scene_images(scene: Scene,hash_tolerance: int= 20, downscale: int= 512, session: Session= None) -> bool:
     image_hashes= []

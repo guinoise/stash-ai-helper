@@ -6,7 +6,7 @@ from stash_ai.config import config
 from stash_ai.db import get_session
 from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Scene
 from utils.performer import get_performer_stash_image, load_performer, get_unknown_performer_image
-from utils.scene import load_scene, create_or_update_scene_from_stash, extract_scene_images
+from utils.scene import load_scene, create_or_update_scene_from_stash, extract_scene_images, decord_scene
 from utils.image import ImageAnalysis, Face
 from datetime import timedelta
 import random
@@ -55,6 +55,7 @@ def extract_images(number_downscale, number_hash_tolerance, state_scene_stash, p
         if scene is None:
             raise gr.Error(f"Scene {state_scene_stash.get('scene_id')} not found in DB!")
         extract_scene_images(scene, hash_tolerance=number_hash_tolerance, downscale=number_downscale, session=session)
+        #decord_scene(scene, hash_tolerance=number_hash_tolerance, downscale=number_downscale, session=session)
         session.commit()
            
     # nb_images= math.ceil(number_duration * number_extract_images_per_seconds)
