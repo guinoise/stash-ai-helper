@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from dateutil import parser
 from datetime import datetime
 from utils.utils import update_object_data
-from utils.performer import load_performer
+from utils.performer import load_performer, get_performer_stash_image
 from urllib.parse import urlparse
 import pathlib
 import imagehash
@@ -84,6 +84,8 @@ def create_or_update_scene_from_stash(scene_id: int, scene_json: Optional[Dict],
             scene.performers.remove(performer)
         logger.debug(f"create_or_update_scene_from_stash performers before exit {scene.performers}")
         scene.stash_updated_at= stash_udpated_at
+        #Force download of image
+        get_performer_stash_image(performer, True)
         session.add(scene)
     return scene
 

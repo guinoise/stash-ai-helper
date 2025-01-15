@@ -20,6 +20,12 @@ class Performer(BaseModel):
     stash_boxes_id: Mapped[List["PerformerStashBox"]] = relationship(back_populates="performer")
     stashbox_images: Mapped[List["PerformerStashBoxImage"]]= relationship(back_populates="performer")
     stash_updated_at: Mapped[Optional[datetime]]
+
+    def get_stash_image_url(self) -> str|None:
+        if self.stash_image is None:
+            return None
+        return f"{config.stash_base_url}{self.stash_image}" 
+       
     def __repr__(self):
         return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} Name: {self.name} Image: {self.stash_image}, Stash Boxes : {self.stash_boxes_id})"
 

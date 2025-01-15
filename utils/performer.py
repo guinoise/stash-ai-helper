@@ -13,6 +13,7 @@ from utils.stashbox import endpoint_to_hash
 from dateutil import parser
 from utils.utils import update_object_data
 import json
+from urllib.parse import urlparse
 
 def get_unknown_performer_image():
     unknown_performer_img_path= config.base_dir.joinpath('assets/Unknown-performer.png')
@@ -33,17 +34,22 @@ def create_or_update_performer_from_stash(performer_id: int, performer_data: Opt
     performer: Performer= session.get(Performer, performer_id)
     if performer is None and performer_data is None:
         return None
+    url= performer_data.get('image_path')
+    if url is not None:
+        url= urlparse(url).path
+        logger.debug(f"Parsed : {url}")    
+    
     if performer is None:
         logger.info(f"Create new performer in db {performer_id}")
         performer= Performer(id= performer_data.get('id'), 
                              name=performer_data.get('name'), 
-                             stash_image= performer_data.get('image_path')
+                             stash_image= url
                              )
     stash_udpated_at= parser.parse(performer_data.get('updated_at', '1970-01-01')).replace(tzinfo=None)    
     if performer.stash_updated_at is None or performer.stash_updated_at < stash_udpated_at:
         logger.info(f"Update performer {performer_id} fields with stash data")
         performer.name= performer_data.get('name')
-        performer.stash_image= performer_data.get('image_path')
+        performer.stash_image= url
         stash_ids= []
         for stash_id in performer_data.get('stash_ids', []):
             logger.debug(f"Performer {performer_id} Stash id {stash_id}")
@@ -69,16 +75,27 @@ def create_or_update_performer_from_stash(performer_id: int, performer_data: Opt
     return performer
 
 
-def get_performer_stash_image(performer: Performer) -> Image.Image:
-    logger.info(f"Downloading image for performer {performer}")
+def get_performer_stash_image(performer: Performer, force_download=False) -> Image.Image:
+    logger.info(f"get_performer_stash_image Downloading image for performer {performer} force download {force_download}")
+    if performer.stash_image is None:
+        return None
+    filepath= config.data_dir.joinpath(f"main_images/performer_{performer.id}.jpg")
+    if filepath.exists():
+        if not force_download:
+            logger.debug(f"get_performer_stash_image locally served")
+            return Image.open(filepath)
+        else:
+            logger.debug(f"get_performer_stash_image force download new image")
+
+    if not filepath.parent.exists():
+        filepath.parent.mkdir(parents=True)
+        
     try:
-        #TODO correct fix, temporary patch implemented
-        parts= urlparse(performer.stash_image)
-        new_url= parts._replace(scheme= config.stash_schema, netloc= f"{config.stash_hostname}:{config.stash_port}").geturl()
-        logger.debug(f"Original url : {performer.stash_image} new: {new_url}")
-        r= requests.get(new_url, stream=True)
+        logger.debug(f"get_performer_stash_image download {performer.get_stash_image_url()}")
+        r= requests.get(performer.get_stash_image_url(), stream=True)
         if r.status_code == 200:
             img= Image.open(io.BytesIO(r.content))
+            img.save(filepath)
             return img
         else:
             logger.error(f"Unable to download {performer.stash_image}, status code {r.status_code}")

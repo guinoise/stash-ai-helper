@@ -48,7 +48,8 @@ def display_performer(state_performer_stash, performer_id: int):
     with get_session(expire_on_commit=False) as session:
         if config.dev_mode and config.stash_interface is not None:
             performer_json= config.stash_interface.find_performer(performer_id)
-        performer: Performer= load_performer(performer_id, session)
+        #performer: Performer= load_performer(performer_id, session)
+        performer: Performer= create_or_update_performer_from_stash(performer_id, None, session)
         logger.debug(f"Performer loaded : {performer}")
         if performer is None:
             raise gr.Error(f"Unable to load perfomer {performer_id}")
