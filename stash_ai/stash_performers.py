@@ -238,7 +238,10 @@ def stash_performers_tab():
         gallery_search_performers.select(performer_gallery_select, 
                                         inputs=[state_search_performer], 
                                         outputs=[txt_performer_id, performers_tabs]
-                                        )
+                                        ).then(display_performer, 
+                                               inputs=[state_peformer_stash, txt_performer_id], 
+                                               outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
+                                               )
         btn_load_performer_id.click(display_performer, 
                                     inputs=[state_peformer_stash, txt_performer_id], 
                                     outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
