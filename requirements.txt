@@ -16,3 +16,4 @@ cmake #required for dlib
 dlib
 mediapipe
 ultralytics
+decord
