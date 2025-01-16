@@ -121,7 +121,8 @@ def handler_load_scene(scene_id, state_scene_stash):
     logger.info(f"handler_load_scene : {scene_id}")
     with get_session(expire_on_commit=False) as session:
         scene: Scene= create_or_update_scene_from_stash(scene_id, None, session)
-        state_scene_stash["scene_id"]= scene.id
+        state_scene_stash["scene_id"]= scene.id if scene is not None else None
+    logger.debug(f"handler_load_scene out state : {state_scene_stash}")
     return state_scene_stash
 
     # outputs=[html_scene_infos, gallery_performers, state_scene_stash]
