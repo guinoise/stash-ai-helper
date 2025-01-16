@@ -9,6 +9,7 @@ from datetime import datetime
 from stash_ai.config import config
 import pathlib
 import math
+
 class BaseModel(DeclarativeBase):
     pass
 
@@ -112,6 +113,7 @@ class Scene(BaseModel):
     video_codec: Mapped[str]
     width: Mapped[int]
     height: Mapped[int]
+    scale: Mapped[int]
     fps: Mapped[float]
     duration: Mapped[float]
     downscale: Mapped[Optional[int]]

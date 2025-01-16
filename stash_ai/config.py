@@ -180,7 +180,7 @@ def config_tab():
         else:
             type='password'
         return gr.Textbox(type=type)
-    tab_config.select(get_config_handler, None, outputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key])
+    tab_config.select(get_config_handler, None, outputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key, txt_aes_password])
     btn_save_config.click(save_config_btn_handler, inputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key, txt_aes_password], outputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key, txt_aes_password])
     btn_reload_stash_config.click(connect_to_stash)
     btn_backup.click(backup_button_handler, txt_filename, dd_db_backups)

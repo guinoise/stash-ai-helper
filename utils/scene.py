@@ -45,6 +45,7 @@ def create_or_update_scene_from_stash(scene_id: int, scene_json: Optional[Dict],
                              video_codec= scene_json.get('files', [{}])[0].get('video_codec'),
                              width= scene_json.get('files', [{}])[0].get('width'),
                              height= scene_json.get('files', [{}])[0].get('height'),
+                             scale= max(scene_json.get('files', [{}])[0].get('width'), scene_json.get('files', [{}])[0].get('height')),
                              fps= scene_json.get('fps', [{}])[0].get('frame_rate'),
                              duration= scene_json.get('duration', [{}])[0].get('duration'),
                              relative_extract_dir= str(config.data_dir.joinpath('scene_extraction').joinpath(f"extracted_scene_{scene_id}").relative_to(config.data_dir.joinpath('scene_extraction'))),
@@ -64,6 +65,7 @@ def create_or_update_scene_from_stash(scene_id: int, scene_json: Optional[Dict],
         update_object_data(scene, 'video_codec', scene_json.get('files', [{}])[0].get('video_codec'))
         update_object_data(scene, 'width', scene_json.get('files', [{}])[0].get('width'))
         update_object_data(scene, 'height', scene_json.get('files', [{}])[0].get('height'))
+        update_object_data(scene, 'scale', max(scene.width, scene.height))
         update_object_data(scene, 'fps', scene_json.get('files', [{}])[0].get('frame_rate'))
         update_object_data(scene, 'duration', scene_json.get('files', [{}])[0].get('duration'))
         performers_ids= []
@@ -134,7 +136,7 @@ def decord_scene(scene: Scene,hash_tolerance: int= 20, downscale: int= 512, sess
         if scene.local_file_name is not None:
             local_file= pathlib.Path(scene.local_file_name)
             if local_file.is_file():
-                location= local_file
+                location= str(local_file.resolve())
         if location is None and scene.url is not None:
             location= scene.get_url()
             
