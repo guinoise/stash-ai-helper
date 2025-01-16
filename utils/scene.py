@@ -137,7 +137,7 @@ def decord_scene(scene: Scene,hash_tolerance: int= 20, downscale: int= 512, sess
         if scene.local_file_name is not None:
             local_file= pathlib.Path(scene.local_file_name)
             if local_file.is_file():
-                location= str(local_file.resolve())
+                location= f"file://{str(local_file.resolve())}"
         if location is None and scene.url is not None:
             location= scene.get_url()
             
@@ -149,18 +149,19 @@ def decord_scene(scene: Scene,hash_tolerance: int= 20, downscale: int= 512, sess
             logger.debug(f"extract_images Open VideoCapture {location}")
             ctx= de.cpu()
             videos= [location]
+            start= datetime.now()
             vl= de.VideoLoader(videos, ctx, (6, scene.height, scene.width, 3), 1,1,1)
             frame= 0
-            for batch in tqdm(vl, desc="Extracting...", unit="frame"):
+            for batch in tqdm(vl, desc="Extracting...", unit="batch"):
                 bb: de.ndarray.NDArray
                 for bb in batch:
-                    logger.debug(f"bb shape {bb.shape}")
+                    #logger.debug(f"bb shape {bb.shape}")
                     depth= bb.shape[3] if len(bb.shape) == 4 else 2
                     if depth == 2:
                         #logger.warning("skipping frame depth 2")
                         continue
                     image: np.ndarray= bb.asnumpy()
-                    logger.debug(f"image shape {image.shape}")
+                    #logger.debug(f"image shape {image.shape}")
                     if depth == 4:
                         pImg= Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGRA2RGB))
                     else:
