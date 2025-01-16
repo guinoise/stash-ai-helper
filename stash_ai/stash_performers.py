@@ -208,7 +208,7 @@ def stash_performers_tab():
                             with gr.Column(scale=1):
                                 number_deepface_extends= gr.Number(label= "Extends % face detection", value=30)
                             with gr.Column(scale=1):
-                                number_deepface_min_confidence= gr.Number(value=0.7, maximum=1, step=0.01, label="Minimum confidence")
+                                number_deepface_min_confidence= gr.Number(value=0.9, maximum=1, step=0.01, label="Minimum confidence")
                             # radio_deepface_analysis= gr.Radio(choices=["gender", "race", "emotion"],
                             #                                                                     value="gender",
                             #                                                                     label="Attributes",
