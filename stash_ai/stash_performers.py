@@ -13,7 +13,7 @@ import pandas as pd
 import numpy as np
 import utils.image as util_img
 
-FULL_SEARCH_ALLOWED=True
+FULL_SEARCH_ALLOWED=False
 
 def download_images_from_stash_box(performer_id, state_peformer_stash):
     logger.info(f"Download images from stashbox for performer {performer_id}")
