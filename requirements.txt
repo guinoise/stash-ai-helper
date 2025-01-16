@@ -17,3 +17,4 @@ dlib
 mediapipe
 ultralytics
 decord
+#nvidia-cudnn-cu12~=9.3
