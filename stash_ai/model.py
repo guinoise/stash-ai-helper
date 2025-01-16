@@ -183,7 +183,7 @@ class ImgFile(BaseModel):
     height: Mapped[int]
     img: Mapped["Img"]= relationship(back_populates="files")
     _relative_path: ClassVar[pathlib.Path]= None
-    
+        
     def get_image_path(self):
         if self.relative_path is None:
             return None
@@ -191,6 +191,9 @@ class ImgFile(BaseModel):
             self._relative_path= config.data_dir.joinpath(self.relative_path)
             
         return self._relative_path
+
+    def exists(self):
+        return self.relative_path and self.get_image_path().exists()
 
     def __repr__(self):
         return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.phash} scale: {self.scale} size: {self.width}x{self.height}, format: {self.format} mode: {self.mode}, content-type: {self.content_type}, relative_path: {self.relative_path})"

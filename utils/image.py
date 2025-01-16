@@ -177,7 +177,7 @@ def convert_rgba_to_rgb(img: Image.Image, background_color= (0,0,0)) -> Image.Im
     background.paste(img, mask=img.split()[3]) #3 is the alpha channel
     return background
     
-def download_image(uri: str, img_type: ImageType, current_session: Session) -> Tuple[ImgFile, Image.Image]:
+def download_image(uri: str, img_type: ImageType, save_base_name: str, current_session: Session) -> Tuple[ImgFile, Image.Image]:
     logger.info(f"download_image Downloading image at {uri}")        
     try:
         if current_session is None:
@@ -234,8 +234,13 @@ def download_image(uri: str, img_type: ImageType, current_session: Session) -> T
                     break
             else:
                 logger.debug("New image file")
-                imgFile= ImgFile(img= img, scale=scale, mode=pImg.mode,format=pImg.format, content_type= content_type, width=w, height=h)
+                relative_path= f"{save_base_name}.{pImg.format}"
+                imgFile= ImgFile(img= img, scale=scale, mode=pImg.mode,format=pImg.format, content_type= content_type, width=w, height=h, relative_path= relative_path)
                 img.files.append(imgFile)
+                path= imgFile.get_image_path()
+                if not path.parent.exists():
+                    path.parent.mkdir(parents=True)
+                pImg.save(path, format=pImg.format)
                 updated= True
             if overwrite_image and imgFile.relative_path:
                 logger.warning("Overwritting image")

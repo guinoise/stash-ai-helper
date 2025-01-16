@@ -131,7 +131,7 @@ def get_performer_stash_image(performer: Performer, force_download=False, sessio
             logger.debug(f"get_performer_stash_image img: {img}")
             imgFile= img.get_highres_imgfile()
             logger.debug(f"get_performer_stash_image imgFile: {imgFile}")
-            if not force_download and imgFile:
+            if not force_download and imgFile and imgFile.exists():
                 logger.debug(f"get_performer_stash_image locally served")
                 return Image.open(imgFile.get_image_path())
             elif imgFile:
@@ -141,16 +141,10 @@ def get_performer_stash_image(performer: Performer, force_download=False, sessio
 
         imgFile: ImgFile
         img: Image.Image
-        imgFile, img= download_image(f"stash://{performer.stash_image}", ImageType.PERFORMER_MAIN, current_session)
+        imgFile, img= download_image(f"stash://{performer.stash_image}", ImageType.PERFORMER_MAIN, f"main_images/performer_{performer.id}", current_session)
         if imgFile.img.performer is None or imgFile.img.performer.id != performer.id:
             imgFile.img.performer= performer
             current_session.add(imgFile.img)
-        if not imgFile.relative_path or not imgFile.get_image_path().exists():                
-            imgFile.relative_path= f"main_images/performer_{performer.id}.{imgFile.format}"
-            logger.info(f"get_performer_stash_image save image to {imgFile.relative_path}")
-            if not imgFile.get_image_path().parent.exists():
-                imgFile.get_image_path().parent.mkdir(parents=True)                
-            img.save(imgFile.get_image_path(), imgFile.format)            
         return img
     except Exception as e:
         logger.error(f"Error downloading image {performer.stash_image} for performer {performer.id}: {e!s}")
