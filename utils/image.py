@@ -10,6 +10,14 @@ from typing import List, Union, Tuple
 import numpy as np
 from PIL import Image
 import cv2
+from stash_ai.model import ImageType, Img, ImgFile
+import requests
+import io
+import imagehash
+from stash_ai.db import get_session
+from sqlalchemy.orm import Session
+from utils.utils import update_object_data
+from stash_ai.config import config
 
 @dataclass
 class Point():
@@ -168,4 +176,80 @@ def convert_rgba_to_rgb(img: Image.Image, background_color= (0,0,0)) -> Image.Im
     background= Image.new("RGB", img.size, background_color)
     background.paste(img, mask=img.split()[3]) #3 is the alpha channel
     return background
+    
+def download_image(uri: str, img_type: ImageType, current_session: Session) -> Tuple[ImgFile, Image.Image]:
+    logger.info(f"download_image Downloading image at {uri}")        
+    try:
+        if current_session is None:
+            session= get_session()
+        else:
+            session= current_session       
+        if uri.startswith('stash://'):
+            download_uri= f"{config.stash_base_url}{uri[8:]}"
+        else:
+            download_uri= uri
+        r= requests.get(download_uri, stream=True)
+        if r.ok:
+            pImg= Image.open(io.BytesIO(r.content))
+            content_type= r.headers['content-type']
+            phash= str(imagehash.phash(pImg))
+            img= session.get(Img, phash)
+            updated= False
+            if img is None:
+                logger.debug("New img object")
+                img= Img(phash= phash, image_type= img_type, external_uri= uri)
+                updated= True
+            else:
+                if update_object_data(img, 'external_uri', uri):
+                    logger.warning("Uri changed for image")
+                    updated= True
+                if update_object_data(img, 'image_type', img_type):
+                    logger.warning("Image type changed for image")
+                    updated= True                    
+            if updated:
+                session.add(img)
+            updated= False
+            w, h= pImg.size
+            scale= max(w,h)
+            imgFile: ImgFile
+            overwrite_image= False
+            for imgFile in img.files:
+                if imgFile.scale == scale:
+                    if update_object_data(imgFile, 'content_type', content_type):
+                        logger.warning("New content type for image, overwrite")
+                        updated= True
+                        overwrite_image= True
+                    if update_object_data(imgFile, 'width', w) or update_object_data(imgFile, 'height', h):
+                        logger.warning("New resolution for image, overwrite")
+                        updated= True
+                        overwrite_image= True
+                    if update_object_data(imgFile, 'mode', pImg.mode):
+                        logger.warning("New image mode")
+                        updated= True
+                        overwrite_image= True
+                    if update_object_data(imgFile, 'format', pImg.format):
+                        logger.warning("New image format")
+                        updated= True
+                        overwrite_image= True
+                    break
+            else:
+                logger.debug("New image file")
+                imgFile= ImgFile(img= img, scale=scale, mode=pImg.mode,format=pImg.format, content_type= content_type, width=w, height=h)
+                img.files.append(imgFile)
+                updated= True
+            if overwrite_image and imgFile.relative_path:
+                logger.warning("Overwritting image")
+                pImg.save(imgFile.get_image_path(), format=pImg.format)
+            if updated:
+                session.add(imgFile)
+            return (imgFile, pImg)
+        else:
+            logger.error(f"download_image Unable to download {uri}, status code {r.status_code}")
+    except Exception as e:
+        logger.error(f"download_image Error downloading image {uri}: {e!s}")
+        logger.exception(e)
+    finally:
+        if current_session is None:
+            session.commit() 
+    return (None, None)
     

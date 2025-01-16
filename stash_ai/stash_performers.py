@@ -52,7 +52,7 @@ def display_performer(state_performer_stash, performer_id: int):
         logger.debug(f"Performer loaded : {performer}")
         if performer is None:
             raise gr.Error(f"Unable to load perfomer {performer_id}")
-        performer_image= get_performer_stash_image(performer)
+        performer_image= get_performer_stash_image(performer, session=session)
         for sbi in performer.stash_boxes_id:
             stash_ids+=f"{', ' if stash_ids else ''}{sbi.stash_box.name if sbi.stash_box else ''}: {sbi.stash_id}"
         stash_images, img_ids= get_downloaded_stash_box_images_for_performer(performer, session, return_tuple_ids=True)
@@ -85,7 +85,7 @@ def search_performer_by_name(txt_performer_name):
             for performer_data in performers:
                 logger.info(f"Loading performer id {performer_data.get('id')}")
                 performer: Performer= create_or_update_performer_from_stash(performer_data.get('id'), performer_data, session)
-                img= get_performer_stash_image(performer)
+                img= get_performer_stash_image(performer, session= session)
                 if img is None:
                     logger.error(f"Error img is none {performer.id}")
                 else:
@@ -117,7 +117,7 @@ def deepface_analysis(performer_id, state_performer_stash, radio_deepface_detect
         gr.Info("Using main image")
         with get_session() as session:
             performer: Performer= load_performer(performer_id, session)
-            img= get_performer_stash_image(performer)
+            img= get_performer_stash_image(performer, session= session)
     else:
         image_id= state_performer_stash.get("image_ids")[state_performer_stash.get("current_index")]
         logger.debug(f"Image id (image, performer, stash_box): {image_id}")

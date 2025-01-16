@@ -1,6 +1,6 @@
 from utils.custom_logging import get_logger
 logger= get_logger("utils.performer")
-from stash_ai.model import Performer, PerformerStashBox, PerformerStashBoxImage
+from stash_ai.model import Performer, PerformerStashBox, PerformerStashBoxImage, ImageType, ImgFile, Img
 import requests
 from urllib.parse import urlparse
 from PIL import Image
@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from stash_ai.db import get_session
 from tqdm import tqdm
 import gradio as gr
-from utils.image import convert_rgba_to_rgb
+from utils.image import convert_rgba_to_rgb, download_image
 
 def download_all_stash_images(current_session: Session= None, progress=gr.Progress(track_tqdm=True)):
     logger.info(f"download_all_stash_images")
@@ -113,40 +113,51 @@ def create_or_update_performer_from_stash(performer_id: int, performer_data: Opt
         for s in stash_ids_to_remove:
             performer.stash_boxes_id.remove(s)
         performer.stash_updated_at= stash_udpated_at
+        get_performer_stash_image(performer, force_download=True, session=session)
         session.add(performer)
     return performer
 
 
-def get_performer_stash_image(performer: Performer, force_download=False) -> Image.Image:
+def get_performer_stash_image(performer: Performer, force_download=False, session: Session= None) -> Image.Image:
     logger.info(f"get_performer_stash_image Downloading image for performer {performer} force download {force_download}")
     if performer.stash_image is None:
         return None
-    filepath= config.data_dir.joinpath(f"main_images/performer_{performer.id}.jpg")
-    if filepath.exists():
-        if not force_download:
-            logger.debug(f"get_performer_stash_image locally served")
-            return Image.open(filepath)
-        else:
-            logger.debug(f"get_performer_stash_image force download new image")
-
-    if not filepath.parent.exists():
-        filepath.parent.mkdir(parents=True)
-        
+    current_session= session if session is not None else get_session()
     try:
-        logger.debug(f"get_performer_stash_image download {performer.get_stash_image_url()}")
-        r= requests.get(performer.get_stash_image_url(), stream=True)
-        if r.status_code == 200:
-            img= Image.open(io.BytesIO(r.content))
-            if img.mode == "RGBA":
-                logger.debug("get_performer_stash_image image has transparency, removing it")
-                img= convert_rgba_to_rgb(img)
-            img.save(filepath)
-            return img
-        else:
-            logger.error(f"Unable to download {performer.stash_image}, status code {r.status_code}")
+        statement= select(Img).where(Img.performer == performer).where(Img.image_type == ImageType.PERFORMER_MAIN)
+        row= current_session.execute(statement).fetchone()
+        if row:
+            img: Img= row[0]
+            logger.debug(f"get_performer_stash_image img: {img}")
+            imgFile= img.get_highres_imgfile()
+            logger.debug(f"get_performer_stash_image imgFile: {imgFile}")
+            if not force_download and imgFile:
+                logger.debug(f"get_performer_stash_image locally served")
+                return Image.open(imgFile.get_image_path())
+            elif imgFile:
+                logger.debug(f"get_performer_stash_image force download new image")        
+        
+        logger.debug(f"get_performer_stash_image download {performer.stash_image}")
+
+        imgFile: ImgFile
+        img: Image.Image
+        imgFile, img= download_image(f"stash://{performer.stash_image}", ImageType.PERFORMER_MAIN, current_session)
+        if imgFile.img.performer is None or imgFile.img.performer.id != performer.id:
+            imgFile.img.performer= performer
+            current_session.add(imgFile.img)
+        if not imgFile.relative_path or not imgFile.get_image_path().exists():                
+            imgFile.relative_path= f"main_images/performer_{performer.id}.{imgFile.format}"
+            logger.info(f"get_performer_stash_image save image to {imgFile.relative_path}")
+            if not imgFile.get_image_path().parent.exists():
+                imgFile.get_image_path().parent.mkdir(parents=True)                
+            img.save(imgFile.get_image_path(), imgFile.format)            
+        return img
     except Exception as e:
         logger.error(f"Error downloading image {performer.stash_image} for performer {performer.id}: {e!s}")
         logger.exception(e)
+    finally:
+        if session is None:
+            current_session.commit()
     return None
         
 def download_stash_box_images_for_performer(performer: Performer, session: Session):

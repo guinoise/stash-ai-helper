@@ -9,6 +9,14 @@ from datetime import datetime
 from stash_ai.config import config
 import pathlib
 import math
+import enum
+
+class ImageType(enum.Enum):
+    STASH_BOX_PERFORMER= "stash_box_performer"
+    PERFORMER_MAIN= "performer"
+    SCENE_FRAME= "scene_frame"
+    FACE= "face"
+    BODY= "body"
 
 class BaseModel(DeclarativeBase):
     pass
@@ -21,7 +29,7 @@ class Performer(BaseModel):
     stash_boxes_id: Mapped[List["PerformerStashBox"]] = relationship(back_populates="performer")
     stashbox_images: Mapped[List["PerformerStashBoxImage"]]= relationship(back_populates="performer")
     stash_updated_at: Mapped[Optional[datetime]]
-
+    images: Mapped[List["Img"]]= relationship(back_populates="performer")
     def get_stash_image_url(self) -> str|None:
         if self.stash_image is None:
             return None
@@ -162,3 +170,51 @@ class Scene(BaseModel):
 
     def __repr__(self):
         return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} Updated: {self.stash_updated_at} Title: {self.title} Url: {self.url} Codec: {self.video_codec} Size: {self.width}x{self.height} Downscale : {self.downscale} ({self.downscale_width}x{self.downscale_height}) Nb Images: {self.nb_images} Faces: {self.nb_faces} Performers: {self.performers})"
+
+class ImgFile(BaseModel):
+    __tablename__= "image_file"
+    phash: Mapped[str]= mapped_column(ForeignKey("image.phash"), primary_key=True)
+    scale: Mapped[int]= mapped_column(primary_key=True)
+    content_type: Mapped[str]
+    mode: Mapped[str]
+    format: Mapped[str]
+    relative_path: Mapped[str]
+    width: Mapped[int]
+    height: Mapped[int]
+    img: Mapped["Img"]= relationship(back_populates="files")
+    _relative_path: ClassVar[pathlib.Path]= None
+    
+    def get_image_path(self):
+        if self.relative_path is None:
+            return None
+        if self._relative_path is None:
+            self._relative_path= config.data_dir.joinpath(self.relative_path)
+            
+        return self._relative_path
+
+    def __repr__(self):
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.phash} scale: {self.scale} size: {self.width}x{self.height}, format: {self.format} mode: {self.mode}, content-type: {self.content_type}, relative_path: {self.relative_path})"
+    
+class Img(BaseModel):
+    __tablename__ = "image"
+    phash: Mapped[str]= mapped_column(primary_key=True)
+    image_type: Mapped[ImageType]
+    external_uri: Mapped[Optional[str]]
+    files: Mapped[List["ImgFile"]]= relationship(back_populates="img") 
+    performer_id: Mapped[Optional[int]]= mapped_column(ForeignKey("performer.id"))
+    performer: Mapped["Performer"]= relationship(back_populates="images")
+
+    def get_highres_imgfile(self, check_exists: bool= True) -> ImgFile:
+        highresfile: ImgFile= None
+        logger.debug(f"Img:get_highres_imgfile files {self.files}")
+        for file in self.files:
+            if highresfile is None or highresfile.scale < file.scale:
+                logger.debug(f"{file.relative_path} check_exists {check_exists} file_exists {file.get_image_path() and file.get_image_path().exists()}")
+                if not check_exists or (file.get_image_path() and file.get_image_path().exists()):
+                    highresfile= file
+        return highresfile
+            
+
+    def __repr__(self):
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.phash} Type: {self.image_type.name} URI : {self.external_uri}, Performer id: {self.performer_id}, {len(self.files)} file(s))"
+    
