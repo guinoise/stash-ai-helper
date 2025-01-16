@@ -132,7 +132,7 @@ def image_analysis(image: Union[Image.Image, np.ndarray, pathlib.Path, str], det
         imAnalysis.name= imAnalysis.file.stem
     
     try:
-        results= DeepFace.analyze(imAnalysis.get_numpy(), actions=["age", "gender", "race"], enforce_detection=True, expand_percentage=face_expand)
+        results= DeepFace.analyze(imAnalysis.get_numpy(), detector_backend=detector, actions=["age", "gender", "race"], enforce_detection=True, expand_percentage=face_expand)
         for face_result in results:
             face= Face(x=face_result["region"]["x"],
                     y= face_result["region"]["y"],
