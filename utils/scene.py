@@ -21,6 +21,7 @@ import imagehash
 from PIL import Image
 from tqdm import tqdm
 import decord as de
+import numpy as np
 
 def create_or_update_scene_from_stash(scene_id: int, scene_json: Optional[Dict], session: Session) -> Scene:
     logger.info(f"create_or_update_scene_from_stash {scene_id} from stash")    
@@ -151,9 +152,19 @@ def decord_scene(scene: Scene,hash_tolerance: int= 20, downscale: int= 512, sess
             vl= de.VideoLoader(videos, ctx, (6, scene.height, scene.width, 3), 1,1,1)
             frame= 0
             for batch in tqdm(vl, desc="Extracting...", unit="frame"):
+                bb: de.ndarray.NDArray
                 for bb in batch:
-                    image= bb.asnumpy()
-                    pImg= Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                    logger.debug(f"bb shape {bb.shape}")
+                    depth= bb.shape[3] if len(bb.shape) == 4 else 2
+                    if depth == 2:
+                        #logger.warning("skipping frame depth 2")
+                        continue
+                    image: np.ndarray= bb.asnumpy()
+                    logger.debug(f"image shape {image.shape}")
+                    if depth == 4:
+                        pImg= Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGRA2RGB))
+                    else:
+                        pImg= Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
                     phash= imagehash.phash(pImg)
                     frame+= 1
                     if frame % 500 == 0:
