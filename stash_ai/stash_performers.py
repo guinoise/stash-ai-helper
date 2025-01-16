@@ -204,9 +204,9 @@ def stash_performers_tab():
                                 btn_download_images_from_stash_box= gr.Button(value= 'Download images from stash box', icon='assets/download.png', min_width=60)
                         with gr.Row():
                             with gr.Column(scale=2):
-                                radio_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib"], value="retinaface", label='Detector')
+                                radio_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib"], value="mtcnn", label='Detector')
                             with gr.Column(scale=1):
-                                number_deepface_extends= gr.Number(label= "Extends % face detection", value=0)
+                                number_deepface_extends= gr.Number(label= "Extends % face detection", value=30)
                             with gr.Column(scale=1):
                                 number_deepface_min_confidence= gr.Number(value=0.7, maximum=1, step=0.01, label="Minimum confidence")
                             # radio_deepface_analysis= gr.Radio(choices=["gender", "race", "emotion"],
