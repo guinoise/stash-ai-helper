@@ -4,7 +4,7 @@ logger= get_logger("stash_ai.stash_performers")
 from typing import List, Dict
 import gradio as gr
 from stash_ai.config import config
-from stash_ai.model import StashBox, Performer, PerformerStashBoxImage
+from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Img, ImgFile
 from stash_ai.db import get_session
 from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer, update_all_performers
 from utils.performer import download_all_stash_images
@@ -113,21 +113,23 @@ def deepface_analysis(performer_id, state_performer_stash, radio_deepface_detect
         gr.Warning(f"Invalid selection. Select an image from the stash images.")
         return [state_performer_stash, None, None, None]
 
-    if state_performer_stash.get("current_index", -1) == -1:
-        gr.Info("Using main image")
-        with get_session() as session:
-            performer: Performer= load_performer(performer_id, session)
+    with get_session() as session:
+        performer: Performer= load_performer(performer_id, session)
+        if state_performer_stash.get("current_index", -1) == -1:
+            gr.Info("Using main image")
+            if not performer.main_image.original_file_exists():
+                gr.Warning(f"Main performer file not on disk")
+                return [state_performer_stash, None, None, None]
             img= get_performer_stash_image(performer, session= session)
-    else:
-        image_id= state_performer_stash.get("image_ids")[state_performer_stash.get("current_index")]
-        logger.debug(f"Image id (image, performer, stash_box): {image_id}")
-        img= None
-        with get_session() as session:
-            img_data: PerformerStashBoxImage= session.get(PerformerStashBoxImage, image_id)
-            if img_data is None:
-                gr.Warning(f"Unable to load the selected image from disk.")
-                return [state_performer_stash, None, None]        
-            img= Image.open(img_data.get_image_path())
+        else:
+            image_id= state_performer_stash.get("image_ids")[state_performer_stash.get("current_index")]
+            logger.debug(f"Image id: {image_id}")
+            imgFile: ImgFile= session.get(ImgFile, image_id)
+            if not imgFile.exists():
+                gr.Warning(f"ImgFile id {image_id} {imgFile} not on disk")
+                return [state_performer_stash, None, None, None]
+            
+            img= Image.open(imgFile.get_image_path())
     analysis: util_img.ImageAnalysis= util_img.image_analysis(img, radio_deepface_detector, number_deepface_extends)
     faces= []
     face: util_img.Face

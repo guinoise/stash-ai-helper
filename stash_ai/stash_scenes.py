@@ -1,5 +1,5 @@
 from utils.custom_logging import get_logger
-logger= get_logger("stash_ai.stash_scenes")
+logger= get_logger("stash_ai.stash_scenes", True)
 
 import gradio as gr
 from stash_ai.config import config
@@ -11,13 +11,58 @@ from utils.image import ImageAnalysis, Face
 from datetime import timedelta
 import random
 from PIL import Image
+import utils.image as util_img
+from tqdm import tqdm 
+from typing import List
+import imagehash
 
-def detect_and_extract_faces(radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, checkbox_dryrun_face_detection, progress=gr.Progress()):
-    logger.info(f"detect_and_extract_faces")
+def detect_and_extract_faces(state_scene_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, checkbox_dryrun_face_detection, number_hash_tolerance, number_of_samples, progress=gr.Progress(track_tqdm=True)):
+    logger.info(f"detect_and_extract_faces state {state_scene_stash}, detector {radio_deepface_detector} expand {number_deepface_extends} min_confidence {number_deepface_min_confidence} dryrun {checkbox_dryrun_face_detection} nb samples {number_of_samples}, hash tolerance {number_hash_tolerance}")
     # results= analyse_extracted_video(radio_deepface_detector, number_deepface_extends, checkbox_dryrun_face_detection, progress)
     # logger.debug(f"detect_and_extract_faces {results}")
     gallery_face_dection= []
     gallery_sample_faces= []
+    gallery_unique_faces= []
+    faces_hashes= []
+    infos_html= ""
+    if state_scene_stash.get('scene_id') is None:
+        gr.Warning("Current scene id not found. Reload the scene.")
+        return [gallery_face_dection, gallery_sample_faces, gallery_unique_faces, infos_html]
+    with get_session() as session:
+        scene: Scene= load_scene(state_scene_stash.get('scene_id'), session)
+        if scene is None:
+            raise gr.Error(f"Scene {state_scene_stash.get('scene_id')} not found in DB!")
+        imgs: List[Img]= []
+        if checkbox_dryrun_face_detection:
+            imgs= random.choices(scene.images, k=min(len(scene.images), number_of_samples))
+        else:
+            imgs= scene.images
+
+        img: Img            
+        for img in tqdm(imgs, desc='Processing...', unit='image'):
+            logger.debug(f"detect_and_extract_faces Detection on {img}")
+            if not img.original_file_exists():
+                logger.warning(f"detect_and_extract_faces File not on disk : {img}")
+                continue
+            im= Image.open(img.original_file().get_image_path())
+            analysis: util_img.ImageAnalysis= util_img.image_analysis(im, radio_deepface_detector, number_deepface_extends)
+            face: util_img.Face
+            gallery_face_dection.append(im)
+            gallery_face_dection.append(analysis.get_numpy_with_overlay(number_deepface_min_confidence))
+            for face, face_im in analysis.get_faces_pil(number_deepface_min_confidence):
+                hash= imagehash.phash(face_im)
+                for oh in faces_hashes:
+                    if util_img.hashes_are_similar(hash, oh, number_hash_tolerance):
+                        break
+                else:
+                    gallery_unique_faces.append((face_im, f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
+                faces_hashes.append(hash)
+                gallery_sample_faces.append((face_im, f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
+        infos_html+= f"""
+            <p>Images analyzed : {len(imgs)}</p>
+            <p>Faces extracted : {len(gallery_sample_faces)}</p>
+            <p>Unique faces : {len(gallery_unique_faces)}</p>
+        """
     # metadata: ImageAnalysis
     # for metadata in results:
     #     if not metadata.sample:
@@ -26,7 +71,7 @@ def detect_and_extract_faces(radio_deepface_detector, number_deepface_extends, n
     #     gallery_face_dection.append(metadata.get_numpy_with_overlay(number_deepface_min_confidence))
     #     #gallery_sample_faces.extend(metadata.get_faces_numpy(number_deepface_min_confidence))
     # logger.info(f"analyse_extracted_video : Gallery faces : {len(gallery_face_dection)} Sample faces: {len(gallery_sample_faces)}")
-    return [gallery_face_dection, gallery_sample_faces, None]
+    return [gallery_face_dection, gallery_sample_faces, gallery_unique_faces, infos_html]
     #outputs=[gallery_face_dection, gallery_sample_faces, gallery_unique_faces]
 
 def handle_load_samples(number_of_samples, state_scene_stash):
@@ -177,7 +222,7 @@ def stash_scene_tab():
                                     number_deepface_min_confidence= gr.Number(value=0.9, maximum=1, step=0.01, label="Minimum confidence")
                             with gr.Column():
                                 btn_detect_faces= gr.Button(value='Detect and extract faces', variant='primary')
-                                checkbox_dryrun_face_detection= gr.Checkbox(label='Dry run / Samples only', value=False)
+                                checkbox_dryrun_face_detection= gr.Checkbox(label='Dry run / Samples only', value=True)
                         with gr.Row():
                             number_of_samples= gr.Number(label='Number of samples', precision=0, value=10)
                             btn_load_samples= gr.Button(value='Load samples')
@@ -192,15 +237,17 @@ def stash_scene_tab():
                                             gallery_face_dection= gr.Gallery(label='Face detection on samples', object_fit='contain', columns=2)
                                 with gr.Tab("Extracted faces"):
                                     with gr.Row():
+                                        html_analysis_infos= gr.HTML(label='Information')
+                                    with gr.Row():
                                         with gr.Column():
                                             gallery_sample_faces= gr.Gallery(label='Face detection on samples', object_fit='contain')
                                         with gr.Column():
                                             gallery_unique_faces= gr.Gallery(label='Unique faces detected', object_fit='contain')
                                 
-        # btn_detect_faces.click(detect_and_extract_faces,
-        #                        inputs=[radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, checkbox_dryrun_face_detection],
-        #                        outputs=[gallery_face_dection, gallery_sample_faces, gallery_unique_faces]
-        #                        )
+        btn_detect_faces.click(detect_and_extract_faces,
+                               inputs=[state_scene_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, checkbox_dryrun_face_detection, number_hash_tolerance, number_of_samples],
+                               outputs=[gallery_face_dection, gallery_sample_faces, gallery_unique_faces, html_analysis_infos]
+                               )
         
         btn_extract_images.click(extract_images, 
                                  inputs=[number_hash_tolerance, state_scene_stash],
