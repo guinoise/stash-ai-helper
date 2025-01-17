@@ -1,6 +1,6 @@
 from utils.custom_logging import get_logger
 logger= get_logger("utils.performer")
-from stash_ai.model import Performer, PerformerStashBox, PerformerStashBoxImage, ImageType, ImgFile, Img
+from stash_ai.model import Performer, PerformerStashBox, PerformerStashBoxImage, ImageType, ImgFile, Img, ImgUri
 import requests
 from urllib.parse import urlparse
 from PIL import Image
@@ -18,6 +18,7 @@ from stash_ai.db import get_session
 from tqdm import tqdm
 import gradio as gr
 from utils.image import convert_rgba_to_rgb, download_image
+import imagehash
 
 def download_all_stash_images(current_session: Session= None, progress=gr.Progress(track_tqdm=True)):
     logger.info(f"download_all_stash_images")
@@ -123,11 +124,10 @@ def get_performer_stash_image(performer: Performer, force_download=False, sessio
     if performer.stash_image is None:
         return None
     current_session= session if session is not None else get_session()
+    logger.debug(f"get_performer_stash_image session : {session}")    
     try:
-        statement= select(Img).where(Img.performer == performer).where(Img.image_type == ImageType.PERFORMER_MAIN)
-        row= current_session.execute(statement).fetchone()
-        if row:
-            img: Img= row[0]
+        if performer.main_image:
+            img: Img= performer.main_image
             logger.debug(f"get_performer_stash_image img: {img}")
             imgFile= img.original_file()
             logger.debug(f"get_performer_stash_image imgFile: {imgFile}")
@@ -142,12 +142,14 @@ def get_performer_stash_image(performer: Performer, force_download=False, sessio
         imgFile: ImgFile
         img: Image.Image
         imgFile, img= download_image(f"stash://{performer.stash_image}", ImageType.PERFORMER_MAIN, f"main_images/performer_{performer.id}", current_session)
-        if imgFile.img.performer is None or imgFile.img.performer.id != performer.id:
-            imgFile.img.performer= performer
+        if performer not in imgFile.img.performers:
+            imgFile.img.performers.append(performer)
+            performer.main_image= imgFile.img
             current_session.add(imgFile.img)
+            current_session.add(performer)
         return img
     except Exception as e:
-        logger.error(f"Error downloading image {performer.stash_image} for performer {performer.id}: {e!s}")
+        logger.error(f"get_performer_stash_image Error downloading image {performer.stash_image} for performer {performer.id}: {e!s}")
         logger.exception(e)
     finally:
         if session is None:
@@ -167,74 +169,37 @@ def download_stash_box_images_for_performer(performer: Performer, session: Sessi
             logger.warning(f"No metadata for {sbi.stash_id} on {sbi.stash_box.name}")
         else:
             for image_metadata in sb_metadata.get('images', []):
-                updated=False
                 image_id= image_metadata.get('id')
                 image_path= performer_images_dir.joinpath(image_id)
-                image_metadata_path= performer_images_dir.joinpath(f"{image_id}.json")
-                img_data= session.get(PerformerStashBoxImage, (image_id,sbi.performer_id, sbi.stash_box_id))
-                if img_data is None:
-                    img_data= PerformerStashBoxImage(image_id= image_id, 
-                                                     performer_id= sbi.performer_id, 
-                                                     stash_box_id= sbi.stash_box_id, 
-                                                     url=image_metadata.get('url'),
-                                                     relative_path=str(image_path.relative_to(config.data_dir)),
-                                                     width= image_metadata.get('width'),
-                                                     height=image_metadata.get('height')
-                                                     )
-                    updated= True
-                else:
-                    updated= update_object_data(img_data, "url", image_metadata.get('url')) or updated
-                    updated= update_object_data(img_data, "width", image_metadata.get('width')) or updated
-                    updated= update_object_data(img_data, "height", image_metadata.get('height')) or updated
-                    updated= update_object_data(img_data, "relative_path", str(image_path.relative_to(config.data_dir))) or updated
-                
-                if not image_path.exists():
-                    logger.info(f"Downloading {img_data.url}")
-                    if not image_path.parent.exists():
-                        image_path.parent.mkdir(parents=True)
-                        
-                    try:
-                        response= requests.get(img_data.url, stream=True)
-                        updated= update_object_data(img_data, "last_status_code", response.status_code) or updated
-                        if response.ok:
-                            content_type= response.headers['content-type']
-                            updated= update_object_data(img_data, "content_type", content_type) or updated
-                            with image_metadata_path.open('w') as f:
-                                json.dump(image_metadata, f, indent=2)
-                            img= Image.open(io.BytesIO(response.content))
-                            logger.debug(f"File {image_path.name} content type : {content_type} format: {img.format}")
-                            format= img.format
-                            if img.mode == "RGBA":
-                                logger.debug("download_stash_box_images_for_performer image is RGBA, convert to RGB")
-                                img= convert_rgba_to_rgb(img)
-                            img.save(image_path, format=format)                            
-
-                    except Exception as e:
-                        updated= update_object_data(img_data, "last_status_code", 0) or updated
-                        logger.error(f"Error downloading {img_data.url} : {e!s}")
-                if updated:
-                    session.add(img_data)
+                imgUri= session.get(ImgUri, image_metadata.get('url'))
+                if imgUri:
+                    img= imgUri.img
+                    if update_object_data(img, 'image_type', ImageType.STASH_BOX_PERFORMER):
+                        session.add(img)
+                    if performer not in img.performers:
+                        img.performers.append(performer)
+                        session.add(img)
+                    if img.original_file_exists():
+                        continue
+                (imgFile, im)= download_image(image_metadata.get('url'), ImageType.STASH_BOX_PERFORMER, str(image_path.relative_to(config.data_dir)), session)
+                imgFile.img.performers.append(performer)
+                session.add(imgFile)
             session.commit()
 
 def get_downloaded_stash_box_images_for_performer(performer: Performer, session: Session, return_tuple_ids: bool= False) -> Union[List[Image.Image], Tuple[List[Image.Image], List[Tuple[str,str,str]]]]:
     logger.info(f"Loading stash box images for performer {performer.name} [{performer.id}]")
     pil_images= []
     ids=[]
-    statement= select(PerformerStashBoxImage).where(PerformerStashBoxImage.performer_id == performer.id)
-    img_data: PerformerStashBoxImage
-    for row in session.execute(statement).fetchall():
-        img_data: PerformerStashBoxImage= row[0]
-        if img_data.get_image_path() is None:
-            logger.warning(f"No image path for {img_data.image_id} stash box id {img_data.stash_box_id}")
-            continue
-        
-        logger.debug(f"Image path : {img_data.get_image_path().resolve()}")
-        try:
-            img= Image.open(img_data.get_image_path())
-            pil_images.append(img)
-            ids.append((img_data.image_id, img_data.performer_id, img_data.stash_box_id))
-        except Exception as e:
-            logger.error(f"Error opening image at {img_data.get_image_path().resolve()} : {e!s}")        
+    img: Img
+    for img in performer.images:
+        if img.image_type == ImageType.STASH_BOX_PERFORMER or img.phash == performer.main_image_phash:
+            if not img.original_file_exists():
+                logger.warning(f"Image not on disk {img.phash}")
+                continue
+            img_file= img.original_file()
+            im= Image.open(img_file.get_image_path())
+            ids.append(img_file.id)
+            pil_images.append(im)        
     if return_tuple_ids:
         return (pil_images, ids)
     return pil_images

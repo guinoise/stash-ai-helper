@@ -26,10 +26,12 @@ class Performer(BaseModel):
     id: Mapped[int]= mapped_column(primary_key=True)
     name: Mapped[str]
     stash_image: Mapped[Optional[str]]= None
+    main_image_phash: Mapped[Optional[str]]= mapped_column(ForeignKey("image.phash", name='fk_image'))
+    main_image: Mapped["Img"]= relationship(foreign_keys=[main_image_phash])
     stash_boxes_id: Mapped[List["PerformerStashBox"]] = relationship(back_populates="performer")
     stashbox_images: Mapped[List["PerformerStashBoxImage"]]= relationship(back_populates="performer")
     stash_updated_at: Mapped[Optional[datetime]]
-    images: Mapped[List["Img"]]= relationship(back_populates="performer")
+    images: Mapped[List["Img"]]= relationship(secondary="performers_images")    
     def get_stash_image_url(self) -> str|None:
         if self.stash_image is None:
             return None
@@ -138,7 +140,8 @@ class Scene(BaseModel):
     extends_face_detection: Mapped[Optional[float]]
     nb_faces: Mapped[Optional[int]]    
     performers: Mapped[List[Performer]]= relationship(secondary=performers_scene)
-
+    images: Mapped[List["Img"]]= relationship(secondary="scenes_images")
+    
     def number_of_frames(self) -> int:
         if self.fps is None or self.duration is None:
             return 0
@@ -173,9 +176,10 @@ class Scene(BaseModel):
 
 class ImgFile(BaseModel):
     __tablename__= "image_file"
-    phash: Mapped[str]= mapped_column(ForeignKey("image.phash"), primary_key=True)
-    scale: Mapped[int]= mapped_column(primary_key=True)
-    content_type: Mapped[str]
+    id: Mapped[int]= mapped_column(primary_key=True, autoincrement=True)
+    phash: Mapped[str]= mapped_column(ForeignKey("image.phash"))
+    scale: Mapped[int]
+    content_type: Mapped[Optional[str]]
     mode: Mapped[str]
     format: Mapped[str]
     relative_path: Mapped[str]
@@ -183,7 +187,8 @@ class ImgFile(BaseModel):
     height: Mapped[int]
     img: Mapped["Img"]= relationship(back_populates="files")
     _relative_path: ClassVar[pathlib.Path]= None
-        
+    __table_args__ = (UniqueConstraint("phash", "scale", name="uq_image_file_phash_scale"),)
+    
     def get_image_path(self):
         if self.relative_path is None:
             return None
@@ -197,14 +202,36 @@ class ImgFile(BaseModel):
 
     def __repr__(self):
         return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.phash} scale: {self.scale} size: {self.width}x{self.height}, format: {self.format} mode: {self.mode}, content-type: {self.content_type}, relative_path: {self.relative_path})"
-    
+
+class ImgUri(BaseModel):
+    __tablename__ = "image_uri"
+    uri: Mapped[str]= mapped_column(primary_key=True)
+    image_pash: Mapped[str]= mapped_column(ForeignKey("image.phash"))
+    img: Mapped["Img"]= relationship(back_populates="external_uris")
+
+    def __repr__(self):
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.image_pash} Uri : {self.uri})"
+
+performers_images = Table(
+    "performers_images",
+    BaseModel.metadata,
+    Column("performer_id", ForeignKey("performer.id"), primary_key=True),
+    Column("image_phash", ForeignKey("image.phash"), primary_key=True),
+)
+
+scenes_images = Table(
+    "scenes_images",
+    BaseModel.metadata,
+    Column("scene_id", ForeignKey("scene.id"), primary_key=True),
+    Column("image_phash", ForeignKey("image.phash"), primary_key=True),
+)    
 class Img(BaseModel):
     __tablename__ = "image"
     phash: Mapped[str]= mapped_column(primary_key=True)
     image_type: Mapped[ImageType]
-    external_uri: Mapped[Optional[str]]
-    performer_id: Mapped[Optional[int]]= mapped_column(ForeignKey("performer.id"))
-    performer: Mapped["Performer"]= relationship(back_populates="images")
+    external_uris: Mapped[List["ImgUri"]] = relationship(back_populates="img")
+    performers: Mapped[List[Performer]]= relationship(secondary=performers_images)
+    scenes: Mapped[List[Scene]]= relationship(secondary=scenes_images)
     original_scale: Mapped[Optional[int]]
     files: Mapped[List["ImgFile"]]= relationship(back_populates="img") 
     #original: Mapped[Optional["ImgFile"]]= relationship(foreign_keys=[phash, original_scale])
@@ -227,6 +254,10 @@ class Img(BaseModel):
             if file.scale == self.original_scale:
                 return file        
 
+    def original_file_exists(self):
+        file= self.original_file()
+        return file is not None and file.exists()        
+
     def __repr__(self):
-        return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.phash} Type: {self.image_type.name} URI : {self.external_uri}, Performer id: {self.performer_id}, original_scale: {self.original_scale}, original: {self.original}, {len(self.files)} file(s))"
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.phash} Type: {self.image_type.name} URIs : {self.external_uris}, original_scale: {self.original_scale}, {len(self.files)} file(s))"
     

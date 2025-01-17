@@ -8,7 +8,7 @@ import math
 import cv2
 import shutil
 from typing import List, Optional, Dict
-from stash_ai.model import Scene, Performer
+from stash_ai.model import Scene, Performer, Img, ImgFile, ImageType
 from utils.image import ImageAnalysis, image_analysis, hashes_are_similar
 from sqlalchemy.orm import Session
 from dateutil import parser
@@ -88,7 +88,8 @@ def create_or_update_scene_from_stash(scene_id: int, scene_json: Optional[Dict],
         logger.debug(f"create_or_update_scene_from_stash performers before exit {scene.performers}")
         scene.stash_updated_at= stash_udpated_at
         #Force download of image
-        get_performer_stash_image(performer, True)
+        logger.debug(f"create_or_update_scene_from_stash session : {session}")
+        get_performer_stash_image(performer, False, session)
         session.add(scene)
     return scene
 
@@ -200,7 +201,7 @@ def decord_scene(scene: Scene,hash_tolerance: int= 20, downscale: int= 512, sess
     return True
     
 
-def extract_scene_images(scene: Scene,hash_tolerance: int= 20, downscale: int= 512, session: Session= None) -> bool:
+def extract_scene_images(scene: Scene,hash_tolerance: int= 20, session: Session= None) -> bool:
     image_hashes= []
     nb_frames= scene.number_of_frames()
     logger.info(f"extract_images Scene: {scene.id} FPS: {scene.fps} Hash tolerance {hash_tolerance} Total frames: {nb_frames}")
@@ -218,9 +219,8 @@ def extract_scene_images(scene: Scene,hash_tolerance: int= 20, downscale: int= 5
         progress= tqdm(desc="Extracting...", total=nb_frames, unit="frame")
 
         extract_directory= scene.get_extract_dir()
-        extract_directory_downscale= scene.get_downscale_extract_dir()
         
-        for d in [extract_directory, extract_directory_downscale]:
+        for d in [extract_directory,]:
             if d is None:
                 logger.warning("At least one directory is not setted")
                 raise gr.Error("At least one extraction directory is not setted. Unable to extract.")
@@ -230,9 +230,6 @@ def extract_scene_images(scene: Scene,hash_tolerance: int= 20, downscale: int= 5
         
         scene.nb_images= 0
         scene.nb_faces= 0
-        scene.downscale= downscale
-        scene.downscale_width= 0
-        scene.downscale_height= 0
         scene.hash_tolerance= hash_tolerance
         
         if scene.local_file_name is not None:
@@ -260,23 +257,49 @@ def extract_scene_images(scene: Scene,hash_tolerance: int= 20, downscale: int= 5
                     phash= imagehash.phash(pImg)
                     frame+= 1
                     if frame % 500 == 0:
-                        logger.debug(f"Image {scene.nb_images} frame {frame} of {nb_frames}")
+                        logger.info(f"Image {scene.nb_images} frame {frame} of {nb_frames} COMMIT")
+                        session.commit()
                     progress.update()
                     for other_hash in image_hashes:
                         if hashes_are_similar(other_hash, phash):
                             break
                     else:
-                        image_name= f"{phash}.jpg"
-                        image_path= extract_directory.joinpath(image_name)
-                        pImg.save(image_path)
-                        pImg.thumbnail((downscale, downscale))
-                        image_path= extract_directory_downscale.joinpath(image_name)
-                        pImg.save(image_path)
+                        img= session.get(Img, str(phash))
+                        
+                        if img is not None:
+                            if scene not in img.scenes:
+                                img.scenes.append(scene)
+                                session.add(img)
+                            if not img.original_scale:
+                                img.original_scale= scale
+                            if not img.original_file_exists():
+                                pImg.save(img.original_file().get_image_path())    
+                        else:
+                            img= Img(phash=str(phash), image_type= ImageType.SCENE_FRAME)
+                            session.add(img)
+                            w, h= pImg.size
+                            scale= max(w,h)                            
+                            imgFile: ImgFile
+                            
+                            image_name= f"{phash}.JPEG"
+                            image_path= extract_directory.joinpath(image_name)
+                            imgFile= ImgFile(img= img,
+                                             scale=scale,
+                                             mode=pImg.mode,
+                                             format='JPEG',
+                                             width= w,
+                                             height= h,
+                                             relative_path= str(image_path.relative_to(config.data_dir))
+                                             )
+                            logger.debug(f"extract_scene_images imgFile: {imgFile}")
+                            img.files.append(imgFile)
+                            img.original_scale= scale
+                            session.add(imgFile)
+                            scene.images.append(img)
+                            pImg.save(image_path)
                         scene.nb_images+= 1
+                        session.add(scene)
                         image_hashes.append(phash)
-                        if scene.nb_images == 1:
-                            scene.downscale_width, scene.downscale_height= pImg.size
-
     except Exception as e:
         logger.error(f"extract_images Error extraction {location} : {e!s}")
         logger.exception(e)

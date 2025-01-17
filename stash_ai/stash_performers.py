@@ -41,7 +41,7 @@ def display_performer(state_performer_stash, performer_id: int):
     performer_image= None
     performer_json= None
     stash_ids= ""
-    stash_images= None
+    stash_images= []
     img_ids= []
 
     with get_session(expire_on_commit=False) as session:

@@ -11,17 +11,13 @@ from rich.traceback import install as traceback_install
 
 log = None
 
-def get_logger_debug(logger_name: str):
+def get_logger(logger_name: str, debug=False):
     if log is None:
         setup_rich_logging()
     logger= log.getChild(logger_name)
-    logger.setLevel(logging.DEBUG)
+    if debug:
+        logger.setLevel(logging.DEBUG)
     return logger
-
-def get_logger(logger_name: str):
-    if log is None:
-        setup_rich_logging()
-    return log.getChild(logger_name)
 
 def setup_std_logging():
     global log

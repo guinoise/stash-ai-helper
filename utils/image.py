@@ -10,7 +10,7 @@ from typing import List, Union, Tuple
 import numpy as np
 from PIL import Image
 import cv2
-from stash_ai.model import ImageType, Img, ImgFile
+from stash_ai.model import ImageType, Img, ImgFile, ImgUri
 import requests
 import io
 import imagehash
@@ -193,19 +193,27 @@ def download_image(uri: str, img_type: ImageType, save_base_name: str, current_s
             pImg= Image.open(io.BytesIO(r.content))
             content_type= r.headers['content-type']
             phash= str(imagehash.phash(pImg))
-            img= session.get(Img, phash)
+            external_uri= session.get(ImgUri, uri)
+            if external_uri is not None:
+                img= external_uri.img
+            else:
+                img= session.get(Img, phash)
             updated= False
             if img is None:
                 logger.debug("New img object")
-                img= Img(phash= phash, image_type= img_type, external_uri= uri)
+                img= Img(phash= phash, image_type= img_type)
+                img.external_uris.append(ImgUri(uri=uri, img=img))
                 updated= True
             else:
-                if update_object_data(img, 'external_uri', uri):
-                    logger.warning("Uri changed for image")
+                for external_uri in img.external_uris:
+                    if external_uri.uri == uri:
+                        break
+                else:
+                    img.external_uris.append(ImgUri(uri=uri, img=img))
                     updated= True
-                if update_object_data(img, 'image_type', img_type):
-                    logger.warning("Image type changed for image")
-                    updated= True                    
+                # if update_object_data(img, 'image_type', img_type):
+                #     logger.warning("Image type changed for image")
+                #     updated= True                    
             if updated:
                 session.add(img)
             updated= False
@@ -241,13 +249,15 @@ def download_image(uri: str, img_type: ImageType, save_base_name: str, current_s
                 imgFile= ImgFile(img= img, scale=scale, mode=pImg.mode,format=pImg.format, content_type= content_type, width=w, height=h, relative_path= relative_path)
                 img.files.append(imgFile)
                 img.original_scale= scale
-                path= imgFile.get_image_path()
-                if not path.parent.exists():
-                    path.parent.mkdir(parents=True)
-                pImg.save(path, format=pImg.format)
                 updated= True
+            if not imgFile.exists():
+                if not imgFile.get_image_path().parent.exists():
+                    imgFile.get_image_path().parent.mkdir(parents=True)
+                pImg.save(imgFile.get_image_path(), format=pImg.format)
             if overwrite_image and imgFile.relative_path:
                 logger.warning("Overwritting image")
+                if not imgFile.get_image_path().parent.exists():
+                    imgFile.get_image_path().parent.mkdir(parents=True)
                 pImg.save(imgFile.get_image_path(), format=pImg.format)
             if updated:
                 session.add(imgFile)

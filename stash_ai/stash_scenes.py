@@ -4,12 +4,13 @@ logger= get_logger("stash_ai.stash_scenes")
 import gradio as gr
 from stash_ai.config import config
 from stash_ai.db import get_session
-from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Scene
+from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Scene, Img, ImgFile
 from utils.performer import get_performer_stash_image, load_performer, get_unknown_performer_image
 from utils.scene import load_scene, create_or_update_scene_from_stash, extract_scene_images, decord_scene
 from utils.image import ImageAnalysis, Face
 from datetime import timedelta
 import random
+from PIL import Image
 
 def detect_and_extract_faces(radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, checkbox_dryrun_face_detection, progress=gr.Progress()):
     logger.info(f"detect_and_extract_faces")
@@ -34,40 +35,44 @@ def handle_load_samples(number_of_samples, state_scene_stash):
     if state_scene_stash.get('scene_id') is None:
         gr.Warning("Current scene id not found. Reload the scene.")
         return [None, state_scene_stash]
-    with get_session(expire_on_commit=False) as session:
+    with get_session() as session:
         scene: Scene= load_scene(state_scene_stash.get('scene_id'), session)
         if scene is None:
             raise gr.Error(f"Scene {state_scene_stash.get('scene_id')} not found in DB!")
-        files= list(scene.get_extract_dir().glob('*.jpg'))
-        if len(files) > 0:
-            imgs= random.choices(files, k=min(len(files), number_of_samples))
+        if len(scene.images) > 0:
+            img: Img
+            for img in random.choices(scene.images, k=min(len(scene.images), number_of_samples)):
+                if img.original_file_exists():
+                    imgs.append(Image.open(img.original_file().get_image_path()))
     return [imgs, state_scene_stash]   
 
      
 #inputs=[number_of_samples, state_scene_stash],
-def extract_images(number_downscale, number_hash_tolerance, state_scene_stash, progress= gr.Progress(track_tqdm=True)):
-    logger.info(f"extract_images Downscale {number_downscale} Hash tolerance {number_hash_tolerance} state {state_scene_stash}")
+def extract_images(number_hash_tolerance, state_scene_stash, progress= gr.Progress(track_tqdm=True)):
+    logger.info(f"extract_images Hash tolerance {number_hash_tolerance} state {state_scene_stash}")
+    nb_images= 0
     if state_scene_stash.get('scene_id') is None:
         gr.Warning("Current scene id not found. Reload the scene.")
         return [0, state_scene_stash]
-    with get_session(expire_on_commit=False) as session:
+    with get_session() as session:
         scene: Scene= load_scene(state_scene_stash.get('scene_id'), session)
         if scene is None:
             raise gr.Error(f"Scene {state_scene_stash.get('scene_id')} not found in DB!")
-        extract_scene_images(scene, hash_tolerance=number_hash_tolerance, downscale=number_downscale, session=session)
+        extract_scene_images(scene, hash_tolerance=number_hash_tolerance, session=session)
+        nb_images= scene.nb_images
         #decord_scene(scene, hash_tolerance=number_hash_tolerance, downscale=number_downscale, session=session)
         session.commit()
            
     # nb_images= math.ceil(number_duration * number_extract_images_per_seconds)
     # logger.info(f"extract_images URL: {text_video_url} Img per second : {number_extract_images_per_seconds} FPS: {number_frames_per_second} Total images: {nb_images} Samples: {number_of_samples}")
     # return extract_video_images(text_video_url, number_duration, number_frames_per_second, number_extract_images_per_seconds, number_of_samples, progress)
-    return [scene.nb_images, state_scene_stash]
+    return [nb_images, state_scene_stash]
     #outputs=[gallery_extracted, number_of_images, state_scene_stash]
 
 
 def update_scene_infos(state_scene_stash):
     logger.info(f"update_scene_infos : {state_scene_stash.get('scene_id')}")
-    with get_session(expire_on_commit=False) as session:
+    with get_session() as session:
         scene: Scene= load_scene(state_scene_stash.get('scene_id'), session)
         performers_images= []
         html= ""
@@ -87,19 +92,31 @@ def update_scene_infos(state_scene_stash):
                 </ul>
             </p>
             """
-            if scene.downscale is not None:
+            if scene.nb_images:
                 html += f"""
                 <p>
                     <h2>Extraction information</h2>
                     <ul>
-                        <li>Downscaled extraction {scene.downscale}</li>
-                        <li>Dowscaled size {scene.downscale_width}x{scene.downscale_height}</li>
                         <li>Number of image extracted {scene.nb_images}</li>
                         <li>Hash tolerance during extraction {scene.hash_tolerance}</li>
                         <li>Extraction duration : {str(timedelta(seconds=scene.extraction_time)) if scene.extraction_time is not None else ''}
                     </ul>
                 </p>
                 """
+
+            # if scene.downscale is not None:
+            #     html += f"""
+            #     <p>
+            #         <h2>Extraction information</h2>
+            #         <ul>
+            #             <li>Downscaled extraction {scene.downscale}</li>
+            #             <li>Dowscaled size {scene.downscale_width}x{scene.downscale_height}</li>
+            #             <li>Number of image extracted {scene.nb_images}</li>
+            #             <li>Hash tolerance during extraction {scene.hash_tolerance}</li>
+            #             <li>Extraction duration : {str(timedelta(seconds=scene.extraction_time)) if scene.extraction_time is not None else ''}
+            #         </ul>
+            #     </p>
+            #     """
 
             html+= f"""
             <p><a href="{scene.get_url()}" target="_blank">{scene.get_url()}</a>            
@@ -108,7 +125,7 @@ def update_scene_infos(state_scene_stash):
             performer: Performer
             logger.debug(f"update_scene_infos Performers: {scene.performers}")
             for performer in scene.performers:
-                performer_img= get_performer_stash_image(performer)
+                performer_img= get_performer_stash_image(performer, session=session)
                 performer_text= f"{performer.name} [{performer.id}]"                
                 if performer_img is None:
                     performer_img= get_unknown_performer_image()
@@ -119,9 +136,10 @@ def update_scene_infos(state_scene_stash):
     
 def handler_load_scene(scene_id, state_scene_stash):
     logger.info(f"handler_load_scene : {scene_id}")
-    with get_session(expire_on_commit=False) as session:
+    with get_session() as session:
         scene: Scene= create_or_update_scene_from_stash(scene_id, None, session)
         state_scene_stash["scene_id"]= scene.id if scene is not None else None
+        session.commit()
     logger.debug(f"handler_load_scene out state : {state_scene_stash}")
     return state_scene_stash
 
@@ -147,7 +165,6 @@ def stash_scene_tab():
                         with gr.Row():
                             with gr.Column(scale=4):
                                 with gr.Row():
-                                    number_downscale= gr.Number(label='Downscale to maximum height and width', precision=0, value=512)
                                     number_hash_tolerance= gr.Number(label='Hash tolerance', info='Higher number for less images', precision=0, value=20)
                                 btn_extract_images= gr.Button(value='Extract images', variant='stop')
                             with gr.Column():
@@ -185,8 +202,8 @@ def stash_scene_tab():
         #                        outputs=[gallery_face_dection, gallery_sample_faces, gallery_unique_faces]
         #                        )
         
-        btn_extract_images.click(extract_images,
-                                 inputs=[number_downscale, number_hash_tolerance, state_scene_stash],
+        btn_extract_images.click(extract_images, 
+                                 inputs=[number_hash_tolerance, state_scene_stash],
                                  outputs=[number_of_images, state_scene_stash]
                                  ).then(update_scene_infos, 
                                         inputs=state_scene_stash, 
