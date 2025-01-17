@@ -1,5 +1,5 @@
 from utils.custom_logging import get_logger
-logger= get_logger("utils.image")
+logger= get_logger("utils.image", True)
 
 import gradio as gr
 if gr.NO_RELOAD:
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import pathlib
 from typing import List, Union, Tuple
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import cv2
 from stash_ai.model import ImageType, Img, ImgFile, ImgUri
 import requests
@@ -16,152 +16,108 @@ import io
 import imagehash
 from stash_ai.db import get_session
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from utils.utils import update_object_data
 from stash_ai.config import config
+from stash_ai.model import ImageAnalysis, DeepfaceFace, Point
 
-@dataclass
-class Point():
-    x: int
-    y: int
+def get_face_phash(face: DeepfaceFace):
+    file= get_face_image_path(face)
+    if file is None:
+        return None
     
-    def __iter__(self):
-        yield self.x
-        yield self.y
+    im= Image.open(file)
+    return imagehash.phash(im)
 
-@dataclass
-class Face():
-    x: int
-    y: int
-    w: int
-    h: int
-    age: int= None
-    gender: str= None
-    gender_confidence: float= None
-    race: str= None
-    race_confidence: float= None
-    confidence: float= 0
-    overlapping: bool= False
+    
+def get_face_image_path(face: DeepfaceFace):
+    file= config.data_dir.joinpath(f'image_analysis/{face.image_analysis.id}/{face.id}.JPEG')
+    if file.exists():
+        return file
 
-    def get_top_left(self):
-        return Point(self.x, self.y)
-    
-    def get_top_right(self):
-        return Point(self.x + self.w, self.y)
-    
-    def get_bottom_left(self):
-        return Point(self.x, self.y + self.h)
-    
-    def get_bottom_right(self):
-        return Point(self.x + self.w, self.y + self.h)
-    
-    def overlap(self, other) -> bool:
-        return not (self.get_top_right().x < other.get_bottom_left().x
-                    or self.get_bottom_left().x > other.get_top_right().x
-                    or self.get_top_right().y < other.get_bottom_left().y
-                    or self.get_bottom_left().y > other.get_top_right().y)
-    
-    def __repr__(self):
-        return f"{self.__class__.__module__}.{self.__class__.__name__} (X: {self.x} Y: {self.y} W: {self.w} H: {self.h} Age: {self.age} Gender: {self.gender} {self.gender_confidence} Race: {self.race} ({self.race_confidence}))"
+    if not file.parent.exists():
+        file.parent.mkdir(parents=True)
 
-@dataclass
-class ImageAnalysis():
-    file: pathlib.Path= None
-    name: str= None
-    sample: bool= False
-    faces: List= field(default_factory=lambda: [])
-    pil= None
-    np_array= None
-        
-    def get_pil_image(self):
-        if self.pil is not None:
-            return self.pil
-        if self.np_array is not None:
-            return Image.fromarray(self.np_array)
-        return Image.open(self.file)
+    if not face.image_analysis.image_file.exists():
+        logger.error(f"get_annotated_image_analysis_path Image file is missing {image_analysis.image_file}")
+        return None
+
+    source_img= Image.open(face.image_analysis.image_file.get_image_path())
+    face_im= source_img.crop((face.x, face.y, face.x + face.w, face.y + face.h))
+    face_im.save(file)
+    return file
+
+def get_annotated_image_analysis_path(image_analysis: ImageAnalysis, minimum_confidence: float) -> pathlib.Path:
+    file= config.data_dir.joinpath(f'image_analysis/{image_analysis.id}_{minimum_confidence}.JPEG')
+    if file.exists():
+        return file
             
-    def get_numpy(self):
-        if self.np_array is not None:
-            return self.np_array
-        elif self.pil is not None:
-            return np.array(self.pil)
-        
-        return np.asarray(self.get_pil_image())
-        
-    def get_numpy_with_overlay(self, face_min_confidence: float= 0):
-        img= np.copy(self.get_numpy())
-        face: Face
-        for face in self.faces:
-            if face.overlapping:
-                color=  (204,0,0)
-            elif face.confidence < face_min_confidence:
-                color=  (255,128,0)
-            else:
-                color=  (0,204,0)
-            logger.debug(f"get_numpy_with_overlay face {face} color {color}")
-            img= cv2.rectangle(img, tuple(face.get_top_left()), tuple(face.get_bottom_right()), color, 3)
-            cv2.putText(img, f"{face.confidence}", (face.x, face.y - 10),  cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 3)
-        return img
+    if not file.parent.exists():
+        file.parent.mkdir(parents=True)
 
-    def get_faces_pil(self, face_min_confidence: float= 0) -> List[Tuple[Face, Image.Image]]:
-        im= self.get_pil_image()
-        ims: List[Image.Image]= []
-        face: Face
-        for face in self.faces:
-            if face.confidence < face_min_confidence:
-                continue
-            ims.append((face, im.crop((face.get_top_left().x, face.get_top_left().y, face.get_bottom_right().x, face.get_bottom_right().y))))
-        return ims
-        
-    def get_faces_numpy(self, face_min_confidence: float= 0) -> List[Tuple[Face, np.ndarray]]:
-        im= self.get_numpy()
-        ims: List[np.ndarray]= []
-        face: Face
-        for face in self.faces:
-            if face.confidence < face_min_confidence:
-                continue
-            ims.append((face, im[face.y:face.y+face.h, face.x:face.x+face.w]))
-        return ims
+    if not image_analysis.image_file.exists():
+        logger.error(f"get_annotated_image_analysis_path Image file is missing {image_analysis.image_file}")
+        return None
 
-    def __repr__(self):
-        return f"{self.__class__.__module__}.{self.__class__.__name__} (Name: {self.name} Sample: {self.sample} Faces: {self.faces} Path: {self.file}))"
-          
-def image_analysis(image: Union[Image.Image, np.ndarray, pathlib.Path, str], detector, face_expand) -> ImageAnalysis:
-    logger.info(f"image_analysis type {type(image)} detector {detector} face_expand {face_expand}")
-    imAnalysis= ImageAnalysis()
-    if isinstance(image, Image.Image):
-        imAnalysis.pil= image
-    elif isinstance(image, np.ndarray):
-        imAnalysis.np_array= image
-    elif isinstance(image, pathlib.Path):
-        imAnalysis.file= image
-        imAnalysis.name= image.stem
-    else:
-        imAnalysis.file= pathlib.Path(image)
-        imAnalysis.name= imAnalysis.file.stem
+    source_img= Image.open(image_analysis.image_file.get_image_path())
+    draw= ImageDraw.Draw(source_img)
+    face: DeepfaceFace
+    for face in image_analysis.faces:
+        if face.overlapping:
+            color=  (204,0,0)
+        elif face.confidence < minimum_confidence:
+            color=  (255,128,0)
+        else:
+            color=  (0,204,0)
+        logger.debug(f"get_annotated_image_analysis_path {[tuple(face.get_top_left()), tuple(face.get_bottom_right())]} {source_img.size}")
+        draw.rectangle([tuple(face.get_top_left()), tuple(face.get_bottom_right())], fill=None, outline=color, width=2)
+        draw.text((face.x, face.y - 10), f"{face.confidence}")
+    source_img.save(file)
+    return file
+
+def image_analysis(img_file: ImgFile, detector, face_expand, session: Session) -> ImageAnalysis:
+    logger.info(f"image_analysis detector {detector} face_expand {face_expand} ImgFile {img_file}")
+    statement= select(ImageAnalysis).where(ImageAnalysis.image_file == img_file).where(ImageAnalysis.detector==detector).where(ImageAnalysis.expand_face==face_expand)
+    row= session.execute(statement).fetchone()
+
+    if row:
+        image_analysis: ImageAnalysis= row[0]
+        logger.info(f"image_analysis : Analysis already done, returning db results")
+        return image_analysis
+
+    if not img_file.exists():
+        logger.error(f"image_analysis Img file not on disk {img_file}")    
+        return None
     
+    image_analysis: ImageAnalysis= ImageAnalysis(image_file= img_file, detector=detector, expand_face=face_expand)
+    session.add(image_analysis)
+
     try:
-        results= DeepFace.analyze(imAnalysis.get_numpy(), detector_backend=detector, actions=["age", "gender", "race"], enforce_detection=True, expand_percentage=face_expand)
+        results= DeepFace.analyze(img_file.get_image_path(), detector_backend=detector, actions=["age", "gender", "race"], enforce_detection=True, expand_percentage=face_expand)
         for face_result in results:
-            face= Face(x=face_result["region"]["x"],
-                    y= face_result["region"]["y"],
-                    w= face_result["region"]["w"],
-                    h= face_result["region"]["h"],
-                    age= face_result["age"],
-                    gender= face_result["dominant_gender"],
-                    gender_confidence=face_result["gender"][face_result["dominant_gender"]],
-                    race=face_result["dominant_race"],
-                    race_confidence=face_result["race"][face_result["dominant_race"]],
-                    confidence=face_result["face_confidence"]
-                    )
-            other_face: Face
-            for other_face in imAnalysis.faces:
+            face= DeepfaceFace(image_analysis=image_analysis,
+                               x=face_result["region"]["x"],
+                               y= face_result["region"]["y"],
+                               w= face_result["region"]["w"],
+                               h= face_result["region"]["h"],
+                               age= face_result["age"],
+                               gender= face_result["dominant_gender"],
+                               gender_confidence=face_result["gender"][face_result["dominant_gender"]],
+                               race=face_result["dominant_race"],
+                               race_confidence=face_result["race"][face_result["dominant_race"]],
+                               confidence=face_result["face_confidence"]
+                               )
+            other_face: DeepfaceFace
+            for other_face in image_analysis.faces:
                 if face.overlap(other_face):
                     other_face.overlapping= True
                     face.overlapping= True
-            imAnalysis.faces.append(face)
+            image_analysis.faces.append(face)
+            session.add(face)
     except ValueError:
-        logger.info(f"image_analysis Image {imAnalysis} has no face(s)")
-    return imAnalysis
+        logger.info(f"image_analysis Image {image_analysis} has no face(s)")
+    session.commit()
+    return image_analysis
         
         
 def hashes_are_similar(left_hash, right_hash, tolerance=6):

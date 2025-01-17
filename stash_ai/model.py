@@ -10,6 +10,7 @@ from stash_ai.config import config
 import pathlib
 import math
 import enum
+from dataclasses import dataclass
 
 class ImageType(enum.Enum):
     STASH_BOX_PERFORMER= "stash_box_performer"
@@ -260,4 +261,75 @@ class Img(BaseModel):
 
     def __repr__(self):
         return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.phash} Type: {self.image_type.name} URIs : {self.external_uris}, original_scale: {self.original_scale}, {len(self.files)} file(s))"
+     
+@dataclass
+class Point():
+    x: int
+    y: int
     
+    def __iter__(self):
+        yield self.x
+        yield self.y
+
+class DeepfaceFace(BaseModel):
+    __tablename__ = "deepface_face" 
+    id: Mapped[int]= mapped_column(primary_key=True, autoincrement=True)
+    _image_analysis_id: Mapped[Optional[int]]= mapped_column(ForeignKey("image_analysis.id", name='fk_image_analysis')) 
+    image_analysis: Mapped["ImageAnalysis"]= relationship(back_populates="faces")      
+    x: Mapped[int]
+    y: Mapped[int]
+    w: Mapped[int]
+    h: Mapped[int]
+    age: Mapped[Optional[int]]
+    gender: Mapped[Optional[str]]
+    gender_confidence: Mapped[Optional[float]]
+    race: Mapped[Optional[str]]
+    race_confidence: Mapped[Optional[float]]
+    confidence: Mapped[Optional[float]]
+    overlapping: Mapped[bool]= False
+    performer: Mapped["Performer"]= relationship()
+    _performer_id: Mapped[Optional[str]]= mapped_column(ForeignKey("performer.id", name="fk_performer"))
+    group: Mapped[Optional[str]]
+    relative_path: Mapped[Optional[str]]
+    
+    _file_path: ClassVar[pathlib.Path]
+    
+    def get_image_path(self):
+        if self.relative_path is None:
+            return None
+        if self._image_path is None:
+            self._file_path= config.data_dir.joinpath(self.relative_path)
+        return self._file_path
+    
+    def get_top_left(self):
+        return Point(self.x, self.y)
+    
+    def get_top_right(self):
+        return Point(self.x + self.w, self.y)
+    
+    def get_bottom_left(self):
+        return Point(self.x, self.y + self.h)
+    
+    def get_bottom_right(self):
+        return Point(self.x + self.w, self.y + self.h)
+    
+    def overlap(self, other) -> bool:
+        return not (self.get_top_right().x < other.get_bottom_left().x
+                    or self.get_bottom_left().x > other.get_top_right().x
+                    or self.get_top_right().y < other.get_bottom_left().y
+                    or self.get_bottom_left().y > other.get_top_right().y)
+    
+    def __repr__(self):
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} Image analysis id : {self._image_analysis_id} Group : {self.group} Performer id: {self._performer_id} X: {self.x} Y: {self.y} W: {self.w} H: {self.h} Age: {self.age} Gender: {self.gender} {self.gender_confidence} Race: {self.race} ({self.race_confidence}))"
+
+class ImageAnalysis(BaseModel):
+    __tablename__ = "image_analysis"
+    id: Mapped[int]= mapped_column(primary_key=True, autoincrement=True)
+    _image_file_id: Mapped[Optional[int]]= mapped_column(ForeignKey("image_file.id", name='fk_image_file'))    
+    image_file: Mapped["ImgFile"]= relationship()
+    detector: Mapped[str]
+    expand_face: Mapped[float]
+    faces: Mapped[List["DeepfaceFace"]]= relationship()
+        
+    def __repr__(self):
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} ImgFileId: {self._image_file_id} Detector: {self.detector} Expand face: {self.expand_face}%))"

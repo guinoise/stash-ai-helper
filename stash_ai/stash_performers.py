@@ -4,14 +4,14 @@ logger= get_logger("stash_ai.stash_performers")
 from typing import List, Dict
 import gradio as gr
 from stash_ai.config import config
-from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Img, ImgFile
+from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Img, ImgFile, ImageAnalysis, DeepfaceFace
 from stash_ai.db import get_session
 from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer, update_all_performers
 from utils.performer import download_all_stash_images
+from utils.image import image_analysis, get_annotated_image_analysis_path, get_face_image_path, get_face_phash, hashes_are_similar
 from PIL import Image
 import pandas as pd
 import numpy as np
-import utils.image as util_img
 
 FULL_SEARCH_ALLOWED=False
 
@@ -98,6 +98,23 @@ def search_performer_by_name(txt_performer_name):
     
     return [performers_images,performers, performers_ids]
 
+def handler_complete_deepface_analysis(performer_id, state_performer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence):
+    logger.info(f"handler_complete_deepface_analysis Performer id {performer_id} Current state : {state_performer_stash}")    
+    logger.info(f"handler_complete_deepface_analysis detector {radio_deepface_detector} face expand {number_deepface_extends}")    
+    with get_session() as session:
+        performer: Performer= load_performer(performer_id, session)
+        if performer is None:
+            gr.Warning(f"Unable to load performer {performer_id}")
+            return None
+        img_files= []
+        for img in performer.images:
+            if img.original_file_exists():
+                img_files.append(img.original_file())
+        if len(img_files) == 0:
+            gr.Warning(f"No files to process for performer {performer_id} {performer.name}")
+            return None
+        
+    return None
 #                                            inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence],
 def deepface_analysis(performer_id, state_performer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence):
     logger.debug(f"deepface_analysis Current state : {type(state_performer_stash)} : {state_performer_stash}")    
@@ -112,31 +129,34 @@ def deepface_analysis(performer_id, state_performer_stash, radio_deepface_detect
     if state_performer_stash.get("image_ids") is None or len(state_performer_stash.get("image_ids")) < (state_performer_stash.get("current_index", -1)+1):
         gr.Warning(f"Invalid selection. Select an image from the stash images.")
         return [state_performer_stash, None, None, None]
-
+    faces= []
+    orig_img= None
+    annotated_img= None
     with get_session() as session:
+        img_file: ImgFile= None
         performer: Performer= load_performer(performer_id, session)
         if state_performer_stash.get("current_index", -1) == -1:
             gr.Info("Using main image")
             if not performer.main_image.original_file_exists():
                 gr.Warning(f"Main performer file not on disk")
                 return [state_performer_stash, None, None, None]
-            img= get_performer_stash_image(performer, session= session)
+            img_file= performer.main_image.original_file()
         else:
             image_id= state_performer_stash.get("image_ids")[state_performer_stash.get("current_index")]
             logger.debug(f"Image id: {image_id}")
-            imgFile: ImgFile= session.get(ImgFile, image_id)
-            if not imgFile.exists():
-                gr.Warning(f"ImgFile id {image_id} {imgFile} not on disk")
+            img_file= session.get(ImgFile, image_id)
+            if not img_file.exists():
+                gr.Warning(f"ImgFile id {image_id} {img_file} not on disk")
                 return [state_performer_stash, None, None, None]
             
-            img= Image.open(imgFile.get_image_path())
-    analysis: util_img.ImageAnalysis= util_img.image_analysis(img, radio_deepface_detector, number_deepface_extends)
-    faces= []
-    face: util_img.Face
-    for face, face_im in analysis.get_faces_pil(number_deepface_min_confidence):
-        faces.append((face_im, f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
+        analysis: ImageAnalysis= image_analysis(img_file, radio_deepface_detector, number_deepface_extends, session) 
+        face: DeepfaceFace
+        for face in analysis.faces:
+            faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))            
+        orig_img= img_file.get_image_path()
+        annotated_img= get_annotated_image_analysis_path(analysis, number_deepface_min_confidence)
         
-    return [state_performer_stash, analysis.get_pil_image(), analysis.get_numpy_with_overlay(number_deepface_min_confidence), faces]
+    return [state_performer_stash, orig_img, annotated_img, faces]
     #outputs=[state_peformer_stash, img_performer, img_performer_overly, gallery_faces]
 
 def main_image_selection(state_performer_stash, evt: gr.SelectData):
@@ -215,15 +235,25 @@ def stash_performers_tab():
                             #                                                                     value="gender",
                             #                                                                     label="Attributes",
                             #                                                                     info="Select an Attribute to Analyze")
-                            with gr.Column(scale=1):
-                                btn_deepface_analysis= gr.Button(value='Deep face analysis', variant='primary')
-                        with gr.Row():
-                            with gr.Column(scale=1):
-                                img_performer= gr.Image()
-                            with gr.Column(scale=3):
-                                img_performer_overly= gr.Image()
-                            with gr.Column(scale=1):
-                                gallery_faces= gr.Gallery(label='Face(s)', rows=1)
+                        with gr.Tabs():
+                            with gr.Tab("Single file"):
+                                with gr.Row():
+                                    with gr.Column():
+                                        btn_deepface_analysis= gr.Button(value='Deep face analysis', variant='primary')
+                                with gr.Row():
+                                    with gr.Column(scale=1):
+                                        img_performer= gr.Image()
+                                    with gr.Column(scale=3):
+                                        img_performer_overly= gr.Image()
+                                    with gr.Column(scale=1):
+                                        gallery_faces= gr.Gallery(label='Face(s)', rows=1)
+                            with gr.Tab("Complete performer analysis"):
+                                with gr.Row():
+                                    with gr.Column():
+                                        btn_deepface_analysis_global= gr.Button(value='Deep face analysis', variant='primary')
+                                with gr.Row():
+                                    with gr.Column():
+                                        df_face_results= gr.DataFrame()
             with gr.Tab("Batch operation", id="performer_batch_tab"):
                 btn_update_downloaded= gr.Button(value='Update all downloaded performers')
                 btn_download_all_stashbox_images= gr.Button(icon='assets/download.png', value='Download all images from stashbox for all performers')                    
@@ -281,6 +311,9 @@ def stash_performers_tab():
                                     inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence],
                                     outputs=[state_peformer_stash, img_performer, img_performer_overly, gallery_faces]
                                     )
+        btn_deepface_analysis_global.click(handler_complete_deepface_analysis,
+                                           inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence],
+                                           outputs=[df_face_results])
         btn_update_downloaded.click(update_all_performers, inputs=None, outputs=None)
         btn_download_all_stashbox_images.click(download_all_stash_images, None, None)
 

@@ -4,14 +4,13 @@ logger= get_logger("stash_ai.stash_scenes", True)
 import gradio as gr
 from stash_ai.config import config
 from stash_ai.db import get_session
-from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Scene, Img, ImgFile
+from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Scene, Img, ImgFile, ImageAnalysis, DeepfaceFace
 from utils.performer import get_performer_stash_image, load_performer, get_unknown_performer_image
 from utils.scene import load_scene, create_or_update_scene_from_stash, extract_scene_images, decord_scene
-from utils.image import ImageAnalysis, Face
+from utils.image import image_analysis, get_annotated_image_analysis_path, get_face_image_path, get_face_phash, hashes_are_similar
 from datetime import timedelta
 import random
 from PIL import Image
-import utils.image as util_img
 from tqdm import tqdm 
 from typing import List
 import imagehash
@@ -44,20 +43,21 @@ def detect_and_extract_faces(state_scene_stash, radio_deepface_detector, number_
             if not img.original_file_exists():
                 logger.warning(f"detect_and_extract_faces File not on disk : {img}")
                 continue
-            im= Image.open(img.original_file().get_image_path())
-            analysis: util_img.ImageAnalysis= util_img.image_analysis(im, radio_deepface_detector, number_deepface_extends)
-            face: util_img.Face
+            analysis: ImageAnalysis= image_analysis(img.original_file(), radio_deepface_detector, number_deepface_extends, session)
             gallery_face_dection.append(img.original_file().get_image_path())
-            gallery_face_dection.append(analysis.get_numpy_with_overlay(number_deepface_min_confidence))
-            for face, face_im in analysis.get_faces_pil(number_deepface_min_confidence):
-                hash= imagehash.phash(face_im)
+            gallery_face_dection.append(get_annotated_image_analysis_path(analysis, number_deepface_min_confidence))
+
+            face: DeepfaceFace
+            for face in analysis.faces:
+                hash= get_face_phash(face)
                 for oh in faces_hashes:
-                    if util_img.hashes_are_similar(hash, oh, number_hash_tolerance):
+                    if hashes_are_similar(hash, oh, number_hash_tolerance):
                         break
                 else:
-                    gallery_unique_faces.append((face_im, f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
+                    gallery_unique_faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
                 faces_hashes.append(hash)
-                gallery_sample_faces.append((face_im, f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
+                gallery_sample_faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))                
+        session.commit()
         infos_html+= f"""
             <p>Images analyzed : {len(imgs)}</p>
             <p>Faces extracted : {len(gallery_sample_faces)}</p>
