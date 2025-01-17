@@ -231,12 +231,16 @@ def download_image(uri: str, img_type: ImageType, save_base_name: str, current_s
                         logger.warning("New image format")
                         updated= True
                         overwrite_image= True
+                    if update_object_data(img, 'original_scale', scale):
+                        img.original= imgFile
+                        session.add(img)
                     break
             else:
                 logger.debug("New image file")
                 relative_path= f"{save_base_name}.{pImg.format}"
                 imgFile= ImgFile(img= img, scale=scale, mode=pImg.mode,format=pImg.format, content_type= content_type, width=w, height=h, relative_path= relative_path)
                 img.files.append(imgFile)
+                img.original_scale= scale
                 path= imgFile.get_image_path()
                 if not path.parent.exists():
                     path.parent.mkdir(parents=True)

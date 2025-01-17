@@ -1,7 +1,7 @@
 from utils.custom_logging import get_logger
 logger= get_logger("stash_ai.model")
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import UniqueConstraint, Table, Column, ForeignKey, Integer
+from sqlalchemy import UniqueConstraint, Table, Column, ForeignKey, ForeignKeyConstraint
 from stashapi.stashbox import StashBoxInterface
 from typing import Optional, ClassVar, List
 from PIL import Image
@@ -203,10 +203,13 @@ class Img(BaseModel):
     phash: Mapped[str]= mapped_column(primary_key=True)
     image_type: Mapped[ImageType]
     external_uri: Mapped[Optional[str]]
-    files: Mapped[List["ImgFile"]]= relationship(back_populates="img") 
     performer_id: Mapped[Optional[int]]= mapped_column(ForeignKey("performer.id"))
     performer: Mapped["Performer"]= relationship(back_populates="images")
+    original_scale: Mapped[Optional[int]]
+    files: Mapped[List["ImgFile"]]= relationship(back_populates="img") 
+    #original: Mapped[Optional["ImgFile"]]= relationship(foreign_keys=[phash, original_scale])
 
+    #__table_args__ = (ForeignKeyConstraint(["phash", "original_scale"], ["image_file.phash", "image_file.scale"], 'fk_original_img_file'), )
     def get_highres_imgfile(self, check_exists: bool= True) -> ImgFile:
         highresfile: ImgFile= None
         logger.debug(f"Img:get_highres_imgfile files {self.files}")
@@ -216,8 +219,14 @@ class Img(BaseModel):
                 if not check_exists or (file.get_image_path() and file.get_image_path().exists()):
                     highresfile= file
         return highresfile
-            
+
+    def original_file(self):
+        if self.original_scale is None:
+            return None
+        for file in self.files:
+            if file.scale == self.original_scale:
+                return file        
 
     def __repr__(self):
-        return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.phash} Type: {self.image_type.name} URI : {self.external_uri}, Performer id: {self.performer_id}, {len(self.files)} file(s))"
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.phash} Type: {self.image_type.name} URI : {self.external_uri}, Performer id: {self.performer_id}, original_scale: {self.original_scale}, original: {self.original}, {len(self.files)} file(s))"
     

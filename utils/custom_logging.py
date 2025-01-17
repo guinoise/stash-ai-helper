@@ -11,6 +11,13 @@ from rich.traceback import install as traceback_install
 
 log = None
 
+def get_logger_debug(logger_name: str):
+    if log is None:
+        setup_rich_logging()
+    logger= log.getChild(logger_name)
+    logger.setLevel(logging.DEBUG)
+    return logger
+
 def get_logger(logger_name: str):
     if log is None:
         setup_rich_logging()
@@ -40,7 +47,7 @@ def setup_rich_logging():
     )
 
     log = logging.getLogger("app")
-    log.setLevel(logging.DEBUG)
+    log.setLevel(logging.INFO)
     return log
 
 def setup_logging(clean=False, debug=False):

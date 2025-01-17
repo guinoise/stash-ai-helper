@@ -129,7 +129,7 @@ def get_performer_stash_image(performer: Performer, force_download=False, sessio
         if row:
             img: Img= row[0]
             logger.debug(f"get_performer_stash_image img: {img}")
-            imgFile= img.get_highres_imgfile()
+            imgFile= img.original_file()
             logger.debug(f"get_performer_stash_image imgFile: {imgFile}")
             if not force_download and imgFile and imgFile.exists():
                 logger.debug(f"get_performer_stash_image locally served")
