@@ -9,6 +9,7 @@ from stash_ai.dev import dev_tab
 from stash_ai.stash_performers import stash_performers_tab
 from stash_ai.stash_scenes import stash_scene_tab
 from stash_ai.db import init_engine
+
        
 def UI(*args, **kwargs):
     load_config()
@@ -76,6 +77,18 @@ if __name__ == "__main__":
         "--headless", action="store_true", help="Is the server headless"
     )
     args = parser.parse_args()
+
+    load_config()
+    logger.info("Setting GRADIO_ALLOWED_PATHS")
+    if os.environ.get('GRADIO_ALLOWED_PATHS') is None:
+        allowed_paths= []
+    else:
+        allowed_paths= os.environ.get('GRADIO_ALLOWED_PATHS').split(',')
+    logger.info(f"Allowed_paths before: {allowed_paths}")
+    if str(config.data_dir.resolve()) not in allowed_paths:
+        allowed_paths.append(str(config.data_dir.resolve()))
+    os.environ['GRADIO_ALLOWED_PATHS']= ','.join(allowed_paths)
+    logger.info(f"GRADIO_ALLOWED_PATHS: {os.environ.get('GRADIO_ALLOWED_PATHS')}")
 
     UI(
         inbrowser=args.inbrowser,
