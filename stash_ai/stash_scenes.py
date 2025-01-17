@@ -47,7 +47,7 @@ def detect_and_extract_faces(state_scene_stash, radio_deepface_detector, number_
             im= Image.open(img.original_file().get_image_path())
             analysis: util_img.ImageAnalysis= util_img.image_analysis(im, radio_deepface_detector, number_deepface_extends)
             face: util_img.Face
-            gallery_face_dection.append(im)
+            gallery_face_dection.append(img.original_file().get_image_path())
             gallery_face_dection.append(analysis.get_numpy_with_overlay(number_deepface_min_confidence))
             for face, face_im in analysis.get_faces_pil(number_deepface_min_confidence):
                 hash= imagehash.phash(face_im)
@@ -88,7 +88,7 @@ def handle_load_samples(number_of_samples, state_scene_stash):
             img: Img
             for img in random.choices(scene.images, k=min(len(scene.images), number_of_samples)):
                 if img.original_file_exists():
-                    imgs.append(Image.open(img.original_file().get_image_path()))
+                    imgs.append(img.original_file().get_image_path())
     return [imgs, state_scene_stash]   
 
      
@@ -217,7 +217,7 @@ def stash_scene_tab():
                         with gr.Row():
                             with gr.Column(scale=4):
                                 with gr.Row():
-                                    radio_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib"], value="mtcnn", label='Detector')
+                                    radio_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib", "ssd", "opencv"], value="mtcnn", label='Detector')
                                     number_deepface_extends= gr.Number(label= "Extends % face detection", value=30)
                                     number_deepface_min_confidence= gr.Number(value=0.9, maximum=1, step=0.01, label="Minimum confidence")
                             with gr.Column():
