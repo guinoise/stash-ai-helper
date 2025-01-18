@@ -9,9 +9,7 @@ from stash_ai.db import get_session
 from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer, update_all_performers
 from utils.performer import download_all_stash_images
 from utils.image import image_analysis, get_annotated_image_analysis_path, get_face_image_path, get_face_phash, hashes_are_similar
-from PIL import Image
 import pandas as pd
-import numpy as np
 
 FULL_SEARCH_ALLOWED=False
 
@@ -100,21 +98,27 @@ def search_performer_by_name(txt_performer_name):
 
 def handler_complete_deepface_analysis(performer_id, state_performer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence):
     logger.info(f"handler_complete_deepface_analysis Performer id {performer_id} Current state : {state_performer_stash}")    
-    logger.info(f"handler_complete_deepface_analysis detector {radio_deepface_detector} face expand {number_deepface_extends}")    
+    logger.info(f"handler_complete_deepface_analysis detector {radio_deepface_detector} face expand {number_deepface_extends}")
+    columns=["ImgFile Id", "Group", "Confidence", "Face", "Age", "Gender", "Gender conf.", "Race", "Race conf."]    
+    data= []
+    index= []
     with get_session() as session:
         performer: Performer= load_performer(performer_id, session)
         if performer is None:
             gr.Warning(f"Unable to load performer {performer_id}")
             return None
-        img_files= []
+
         for img in performer.images:
-            if img.original_file_exists():
-                img_files.append(img.original_file())
-        if len(img_files) == 0:
-            gr.Warning(f"No files to process for performer {performer_id} {performer.name}")
-            return None
+            if not img.original_file_exists():
+                continue
+            img_file: ImgFile= img.original_file()
+            analysis: ImageAnalysis= image_analysis(img_file, radio_deepface_detector, number_deepface_extends, session)
+            face: DeepfaceFace
+            for face in analysis.faces:
+                index.append(face.id)
+                data.append((img_file.id, face.group, face.confidence, f"<img style='max-height: 75px;' src='/gradio_api/file={get_face_image_path(face)}'/>", face.age, face.gender, face.gender_confidence, face.race, face.race_confidence))
         
-    return None
+    return pd.DataFrame(data=data, index=index, columns=columns).to_html(escape=False)
 #                                            inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence],
 def deepface_analysis(performer_id, state_performer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence):
     logger.debug(f"deepface_analysis Current state : {type(state_performer_stash)} : {state_performer_stash}")    
@@ -253,7 +257,8 @@ def stash_performers_tab():
                                         btn_deepface_analysis_global= gr.Button(value='Deep face analysis', variant='primary')
                                 with gr.Row():
                                     with gr.Column():
-                                        df_face_results= gr.DataFrame()
+                                        #df_face_results= gr.DataFrame()
+                                        df_face_results= gr.HTML()
             with gr.Tab("Batch operation", id="performer_batch_tab"):
                 btn_update_downloaded= gr.Button(value='Update all downloaded performers')
                 btn_download_all_stashbox_images= gr.Button(icon='assets/download.png', value='Download all images from stashbox for all performers')                    
