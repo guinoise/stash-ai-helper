@@ -9,7 +9,9 @@ from stash_ai.db import get_session
 from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer, update_all_performers
 from utils.performer import download_all_stash_images
 from utils.image import image_analysis, get_annotated_image_analysis_path, get_face_image_path, get_face_phash, hashes_are_similar
+from sqlalchemy import select
 import pandas as pd
+import shutil
 
 FULL_SEARCH_ALLOWED=False
 
@@ -95,6 +97,84 @@ def search_performer_by_name(txt_performer_name):
         gr.Warning("Could not perform a full search.", duration=2)
     
     return [performers_images,performers, performers_ids]
+
+def handler_batch_create_dataset(radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, progress= gr.Progress(track_tqdm=True)):
+    logger.info(f"handler_complete_deepface_analysis detector {radio_deepface_detector} face expand {number_deepface_extends}")
+    columns=["Performer Id", "Performer Name", "ImgFile Id", "Group", "Confidence", "Face", "Age", "Gender", "Gender conf.", "Race", "Race conf."]    
+    data= []
+    index= []
+    performers= []
+    total_img= 0
+    with get_session() as session:
+        dataset_dir= config.data_dir.joinpath('dataset/performers')
+        if dataset_dir.exists():
+            shutil.rmtree(dataset_dir)
+        dataset_dir.mkdir(parents=True)
+        
+        performer: Performer
+        for perf_row in session.execute(select(Performer)).fetchall():
+            performer= perf_row[0]
+            performers.append(performer)
+            total_img+= len(performer.images)
+        
+        progress((0,total_img), desc='Processing...', total=total_img, unit='image')
+        
+        for performer in performers:
+            for img in performer.images:
+                progress.update()
+                if not img.original_file_exists():
+                    continue
+                img_file: ImgFile= img.original_file()
+                analysis: ImageAnalysis= image_analysis(img_file, radio_deepface_detector, number_deepface_extends, session)
+                face: DeepfaceFace
+                for face in analysis.faces:
+                    if face.confidence < number_deepface_min_confidence:
+                        if face.performer is not None:
+                            face.performer= None
+                            session.add(face)
+                        continue
+                    if face.performer != performer:
+                        face.performer= performer
+                        session.add(face)
+                    src=get_face_image_path(face)
+                    dest_file= dataset_dir.joinpath(src.name)
+                    shutil.copy(src, dest_file)
+                    index.append(face.id)
+                    data.append((face.performer.id, face.performer.name,img_file.id, face.group, face.confidence, f"<img style='max-height: 75px;' src='/gradio_api/file={src}'/>", face.age, face.gender, face.gender_confidence, face.race, face.race_confidence))
+        session.commit()
+    return pd.DataFrame(data=data, index=index, columns=columns).to_html(escape=False)
+    
+
+def handler_batch_deepface_analysis(radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, progress= gr.Progress(track_tqdm=True)):
+    logger.info(f"handler_complete_deepface_analysis detector {radio_deepface_detector} face expand {number_deepface_extends}")
+    columns=["Performer Id", "Performer Name", "ImgFile Id", "Group", "Confidence", "Face", "Age", "Gender", "Gender conf.", "Race", "Race conf."]    
+    data= []
+    index= []
+    performers= []
+    total_img= 0
+    with get_session() as session:
+
+        performer: Performer
+        for perf_row in session.execute(select(Performer)).fetchall():
+            performer= perf_row[0]
+            performers.append(performer)
+            total_img+= len(performer.images)
+        
+        progress((0,total_img), desc='Processing...', total=total_img, unit='image')
+        
+        for performer in performers:
+            for img in performer.images:
+                progress.update()
+                if not img.original_file_exists():
+                    continue
+                img_file: ImgFile= img.original_file()
+                analysis: ImageAnalysis= image_analysis(img_file, radio_deepface_detector, number_deepface_extends, session)
+                face: DeepfaceFace
+                for face in analysis.faces:
+                    index.append(face.id)
+                    data.append((performer.id, performer.name,img_file.id, face.group, face.confidence, f"<img style='max-height: 75px;' src='/gradio_api/file={get_face_image_path(face)}'/>", face.age, face.gender, face.gender_confidence, face.race, face.race_confidence))
+        
+    return pd.DataFrame(data=data, index=index, columns=columns).to_html(escape=False)
 
 def handler_complete_deepface_analysis(performer_id, state_performer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence):
     logger.info(f"handler_complete_deepface_analysis Performer id {performer_id} Current state : {state_performer_stash}")    
@@ -260,8 +340,23 @@ def stash_performers_tab():
                                         #df_face_results= gr.DataFrame()
                                         df_face_results= gr.HTML()
             with gr.Tab("Batch operation", id="performer_batch_tab"):
-                btn_update_downloaded= gr.Button(value='Update all downloaded performers')
-                btn_download_all_stashbox_images= gr.Button(icon='assets/download.png', value='Download all images from stashbox for all performers')                    
+                with gr.Accordion(label="Update data", open=False):
+                    btn_update_downloaded= gr.Button(value='Update all downloaded performers')
+                    btn_download_all_stashbox_images= gr.Button(icon='assets/download.png', value='Download all images from stashbox for all performers')
+                    html_result_batch= gr.HTML() 
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        radio_batch_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib", "ssd", "opencv"], value="sdd", label='Detector')
+                    with gr.Column(scale=1):
+                        number_batch_deepface_expand= gr.Number(label= "Expand % face detection", value=30)
+                    with gr.Column(scale=1):
+                        number_batch_deepface_min_confidence= gr.Number(value=0.9, maximum=1, step=0.01, label="Minimum confidence")
+                with gr.Row():
+                    btn_deepface_analysis_batch= gr.Button(value='Deep face analysis', variant='primary')
+                    btn_batch_create_dataset= gr.Button(value='Create dataset', variant='primary')
+                with gr.Row():
+                    df_batch_face_results= gr.HTML(value="<h1>Batch result</h1>")
+                                       
                 
         btn_search_performer_name.click(search_performer_by_name, 
                                         inputs=[txt_search_performer_name], 
@@ -319,6 +414,12 @@ def stash_performers_tab():
         btn_deepface_analysis_global.click(handler_complete_deepface_analysis,
                                            inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence],
                                            outputs=[df_face_results])
-        btn_update_downloaded.click(update_all_performers, inputs=None, outputs=None)
-        btn_download_all_stashbox_images.click(download_all_stash_images, None, None)
+        btn_deepface_analysis_batch.click(handler_batch_deepface_analysis,
+                                           inputs=[radio_batch_deepface_detector, number_batch_deepface_expand, number_batch_deepface_min_confidence],
+                                           outputs=[df_batch_face_results])
+        btn_batch_create_dataset.click(handler_batch_create_dataset,
+                                           inputs=[radio_batch_deepface_detector, number_batch_deepface_expand, number_batch_deepface_min_confidence],
+                                           outputs=[df_batch_face_results])
+        btn_update_downloaded.click(update_all_performers, inputs=None, outputs=html_result_batch)
+        btn_download_all_stashbox_images.click(download_all_stash_images, None, html_result_batch)
 
