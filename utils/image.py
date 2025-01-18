@@ -31,7 +31,10 @@ def get_face_phash(face: DeepfaceFace):
 
     
 def get_face_image_path(face: DeepfaceFace):
-    file= config.data_dir.joinpath(f'image_analysis/{face.image_analysis.id}/{face.id}.JPEG')
+    if face.image_analysis.image_file.mode == "RGBA":
+        file= config.data_dir.joinpath(f'image_analysis/{face.image_analysis.id}/{face.id}.PNG')
+    else:
+        file= config.data_dir.joinpath(f'image_analysis/{face.image_analysis.id}/{face.id}.JPEG')
     if file.exists():
         return file
 
@@ -48,7 +51,10 @@ def get_face_image_path(face: DeepfaceFace):
     return file
 
 def get_annotated_image_analysis_path(image_analysis: ImageAnalysis, minimum_confidence: float) -> pathlib.Path:
-    file= config.data_dir.joinpath(f'image_analysis/{image_analysis.id}_{minimum_confidence}.JPEG')
+    if image_analysis.image_file.mode == "RGBA":
+        file= config.data_dir.joinpath(f'image_analysis/{image_analysis.id}_{minimum_confidence}.PNG')
+    else:
+        file= config.data_dir.joinpath(f'image_analysis/{image_analysis.id}_{minimum_confidence}.JPEG')
     if file.exists():
         return file
             
