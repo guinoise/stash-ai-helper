@@ -19,6 +19,13 @@ class ImageType(enum.Enum):
     FACE= "face"
     BODY= "body"
 
+class FaceStatus(enum.Enum):
+    DISCOVERED= "Discovered"
+    CONFIRMED= "Confirmed"
+    DISCARD= "Discard"
+    AUTO_DISCARD= "Automatic discard"
+    AUTO_CONFIRMED= "Automatic confirmed"
+
 class BaseModel(DeclarativeBase):
     pass
 
@@ -286,20 +293,11 @@ class DeepfaceFace(BaseModel):
     race: Mapped[Optional[str]]
     race_confidence: Mapped[Optional[float]]
     confidence: Mapped[Optional[float]]
-    overlapping: Mapped[bool]= False
+    overlapping: Mapped[bool]= mapped_column(default=False, server_default="0")
     performer: Mapped["Performer"]= relationship()
     _performer_id: Mapped[Optional[str]]= mapped_column(ForeignKey("performer.id", name="fk_performer"))
     group: Mapped[Optional[str]]
-    relative_path: Mapped[Optional[str]]
-    
-    _file_path: ClassVar[pathlib.Path]
-    
-    def get_image_path(self):
-        if self.relative_path is None:
-            return None
-        if self._image_path is None:
-            self._file_path= config.data_dir.joinpath(self.relative_path)
-        return self._file_path
+    status: Mapped[FaceStatus]= mapped_column(server_default=FaceStatus.DISCOVERED.name)    
     
     def get_top_left(self):
         return Point(self.x, self.y)
@@ -314,13 +312,14 @@ class DeepfaceFace(BaseModel):
         return Point(self.x + self.w, self.y + self.h)
     
     def overlap(self, other) -> bool:
+        logger.debug(f"{self.__class__.__module__}.{self.__class__.__name__} overlap self {self.get_top_right()}, {self.get_bottom_left()} Other {other.get_top_right()}, {other.get_bottom_left()}")
         return not (self.get_top_right().x < other.get_bottom_left().x
                     or self.get_bottom_left().x > other.get_top_right().x
-                    or self.get_top_right().y < other.get_bottom_left().y
-                    or self.get_bottom_left().y > other.get_top_right().y)
+                    or self.get_top_right().y > other.get_bottom_left().y
+                    or self.get_bottom_left().y < other.get_top_right().y)
     
     def __repr__(self):
-        return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} Image analysis id : {self._image_analysis_id} Group : {self.group} Performer id: {self._performer_id} X: {self.x} Y: {self.y} W: {self.w} H: {self.h} Age: {self.age} Gender: {self.gender} {self.gender_confidence} Race: {self.race} ({self.race_confidence}))"
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} Image analysis id : {self._image_analysis_id} Group : {self.group} Overlapping {self.overlapping} Performer id: {self._performer_id} X: {self.x} Y: {self.y} W: {self.w} H: {self.h} Age: {self.age} Gender: {self.gender} {self.gender_confidence} Race: {self.race} ({self.race_confidence}))"
 
 class ImageAnalysis(BaseModel):
     __tablename__ = "image_analysis"

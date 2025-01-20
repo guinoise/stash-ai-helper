@@ -163,8 +163,12 @@ def download_stash_box_images_for_performer(performer: Performer, session: Sessi
     if not performer_images_dir.exists():
         performer_images_dir.mkdir(parents=True)
     for sbi in performer.stash_boxes_id:
-        sb= sbi.stash_box.get_stashboxinterface()
-        sb_metadata= sb.find_performer(sbi.stash_id)
+        try:
+            sb= sbi.stash_box.get_stashboxinterface()
+            sb_metadata= sb.find_performer(sbi.stash_id)
+        except Exception as e:
+            logger.error(f"Error getting performer {sbi.stash_id} from stashbox {sbi.stash_box.name} : {e!s}")
+            sb_metadata= None
         if sb_metadata is None:
             logger.warning(f"No metadata for {sbi.stash_id} on {sbi.stash_box.name}")
         else:

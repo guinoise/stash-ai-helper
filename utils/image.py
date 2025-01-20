@@ -1,12 +1,12 @@
 from utils.custom_logging import get_logger
-logger= get_logger("utils.image", True)
+logger= get_logger("utils.image")
 
 import gradio as gr
 if gr.NO_RELOAD:
     from deepface import DeepFace
 from dataclasses import dataclass, field
 import pathlib
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Dict
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import cv2
@@ -20,6 +20,7 @@ from sqlalchemy import select
 from utils.utils import update_object_data
 from stash_ai.config import config
 from stash_ai.model import ImageAnalysis, DeepfaceFace, Point
+from tqdm import tqdm
 
 def get_face_phash(face: DeepfaceFace):
     file= get_face_image_path(face)
@@ -81,27 +82,31 @@ def get_annotated_image_analysis_path(image_analysis: ImageAnalysis, minimum_con
     source_img.save(file)
     return file
 
-def image_analysis(img_file: ImgFile, detector, face_expand, session: Session) -> ImageAnalysis:
+def image_analysis(img_file: ImgFile, detector, face_expand, session: Session, force: bool= False) -> ImageAnalysis:
     logger.info(f"image_analysis detector {detector} face_expand {face_expand} ImgFile {img_file}")
     statement= select(ImageAnalysis).where(ImageAnalysis.image_file == img_file).where(ImageAnalysis.detector==detector).where(ImageAnalysis.expand_face==face_expand)
     row= session.execute(statement).fetchone()
 
     if row:
-        image_analysis: ImageAnalysis= row[0]
-        logger.info(f"image_analysis : Analysis already done, returning db results")
-        return image_analysis
+        analysis: ImageAnalysis= row[0]
+        if force:
+            session.delete(analysis)
+        else:
+            logger.info(f"image_analysis : Analysis already done, returning db results")
+            return analysis
 
     if not img_file.exists():
         logger.error(f"image_analysis Img file not on disk {img_file}")    
         return None
     
-    image_analysis: ImageAnalysis= ImageAnalysis(image_file= img_file, detector=detector, expand_face=face_expand)
-    session.add(image_analysis)
+    analysis: ImageAnalysis= ImageAnalysis(image_file= img_file, detector=detector, expand_face=face_expand)
+    session.add(analysis)
 
     try:
         results= DeepFace.analyze(img_file.get_image_path(), detector_backend=detector, actions=["age", "gender", "race"], enforce_detection=True, expand_percentage=face_expand)
-        for face_result in results:
-            face= DeepfaceFace(image_analysis=image_analysis,
+        logger.debug(f"image_analysis results: \n{results!s}")
+        for i, face_result in enumerate(results):
+            face= DeepfaceFace(image_analysis=analysis,
                                x=face_result["region"]["x"],
                                y= face_result["region"]["y"],
                                w= face_result["region"]["w"],
@@ -111,19 +116,27 @@ def image_analysis(img_file: ImgFile, detector, face_expand, session: Session) -
                                gender_confidence=face_result["gender"][face_result["dominant_gender"]],
                                race=face_result["dominant_race"],
                                race_confidence=face_result["race"][face_result["dominant_race"]],
-                               confidence=face_result["face_confidence"]
+                               confidence=face_result["face_confidence"],
+                               overlapping= False
                                )
+            session.add(face)
             other_face: DeepfaceFace
-            for other_face in image_analysis.faces:
+            for other_face in analysis.faces:
+                if other_face == face:
+                    continue
                 if face.overlap(other_face):
                     other_face.overlapping= True
                     face.overlapping= True
-            image_analysis.faces.append(face)
-            session.add(face)
+                logger.debug(f"Overlapping face check {i}: {face.overlapping} {other_face.overlapping}")
     except ValueError:
-        logger.info(f"image_analysis Image {image_analysis} has no face(s)")
+        logger.info(f"image_analysis Image {analysis} has no face(s)")
+    for face in analysis.faces:
+        logger.debug(f"image_analysis {face}")
     session.commit()
-    return image_analysis
+    logger.info(f"image_analysis {analysis}")
+    for face in analysis.faces:
+        logger.debug(f"image_analysis {face}")
+    return analysis
         
         
 def hashes_are_similar(left_hash, right_hash, tolerance=6):
@@ -233,4 +246,36 @@ def download_image(uri: str, img_type: ImageType, save_base_name: str, current_s
         if current_session is None:
             session.commit() 
     return (None, None)
+    
+def group_faces(group_prefix: str, faces: List[DeepfaceFace], detector_backend, expand_percentage, model_name, session: Session) -> Dict[str, List[DeepfaceFace]]:
+    logger.info(f"group_faces Nb of faces: {len(faces)} Detector : {detector_backend} Expand {expand_percentage}% Model {model_name}")
+    groups= {}
+    face: DeepfaceFace
+    for face in tqdm(faces, desc="Grouping...", unit='face') :
+        for name, group_faces in groups.items():
+            found= True
+            logger.debug(f"group_faces {get_face_image_path(face)} {get_face_image_path(group_faces[0])}")
+            for f in group_faces:
+                result= DeepFace.verify(get_face_image_path(face), get_face_image_path(f), model_name=model_name, detector_backend=detector_backend, expand_percentage=expand_percentage)
+                #logger.debug(f"result: {result}")
+                if result['verified']:
+                    groups.get(name).append(face)
+                    if face.group != name:
+                        face.group= name
+                        session.add(face)
+                    break
+            else:
+                found= False
+            if found:
+                break
+        else:
+            name= f"{group_prefix} {len(groups) + 1}"
+            logger.debug(f"New group {name}")
+            groups[name]= [face]
+            if face.group != name:
+                session.add(face)
+                face.group= name
+    for name, group_faces in groups.items():    
+        logger.debug(f"group_faces {name} : {len(group_faces)}")
+    return groups
     
