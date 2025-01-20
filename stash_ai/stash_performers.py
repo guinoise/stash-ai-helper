@@ -4,7 +4,7 @@ logger= get_logger("stash_ai.stash_performers")
 from typing import List, Dict
 import gradio as gr
 from stash_ai.config import config
-from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Img, ImgFile, ImageAnalysis, DeepfaceFace, FaceStatus
+from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Img, ImgFile, ImageAnalysis, DeepfaceFace, FaceStatus, ImageType
 from stash_ai.db import get_session
 from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer, update_all_performers
 from utils.performer import download_all_stash_images
@@ -53,31 +53,20 @@ def display_performer(state_performer_stash, performer: str):
     performer_image= None
     performer_json= None
     stash_ids= ""
-    stash_images= []
-    img_ids= []
 
     with get_session(expire_on_commit=False) as session:
         if config.dev_mode and config.stash_interface is not None:
             performer_json= config.stash_interface.find_performer(performer_id)
         performer: Performer= load_performer(performer_id, session)
-        #performer: Performer= create_or_update_performer_from_stash(performer_id, None, session)
         logger.debug(f"Performer loaded : {performer}")
         if performer is None:
             raise gr.Error(f"Unable to load perfomer {performer_id}")
         performer_image= get_performer_stash_image(performer, session=session)
         for sbi in performer.stash_boxes_id:
             stash_ids+=f"{', ' if stash_ids else ''}{sbi.stash_box.name if sbi.stash_box else ''}: {sbi.stash_id}"
-        stash_images, img_ids= get_downloaded_stash_box_images_for_performer(performer, session, return_tuple_ids=True)
         session.commit()
-    state_performer_stash["image_ids"]= img_ids
-    if state_performer_stash.get("current_index") is None or state_performer_stash.get("current_index") < len(stash_images):
-        if len(img_ids) > 0:
-            state_performer_stash["current_index"]= 0
-        else:
-            state_performer_stash["current_index"]=  None
     logger.debug(f"End: display_performer Current state : {type(state_performer_stash)} : {state_performer_stash}")        
-    return [performer_id, performer_image, performer.name, stash_ids, performer_json, stash_images, state_performer_stash, None]
-    
+    return [performer_id, performer_image, performer.name, stash_ids, performer_json, state_performer_stash]
 
 def search_performer_by_name(txt_performer_name):
     logger.info(f"Perform search on stash for name {txt_performer_name}")
@@ -127,233 +116,21 @@ def handler_btn_refresh_performer_id(current_selection):
         selection= current_selection
     return gr.Dropdown(choices=performers, value=selection)
 
-def handler_batch_create_dataset(radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, progress= gr.Progress(track_tqdm=True)):
-    logger.info(f"handler_complete_deepface_analysis detector {radio_deepface_detector} face expand {number_deepface_extends}")
-    columns=["Performer Id", "Performer Name", "ImgFile Id", "Group", "Confidence", "Image", "Face", "Status", "Size", "Age", "Gender", "Gender conf.", "Race", "Race conf."]    
-    data= []
-    index= []
-    performers= []
-    total_img= 0
-    with get_session() as session:
-        dataset_dir= config.data_dir.joinpath('dataset/performers')
-        if dataset_dir.exists():
-            shutil.rmtree(dataset_dir)
-        dataset_dir.mkdir(parents=True)
-        
-        performer: Performer
-        for perf_row in session.execute(select(Performer)).fetchall():
-            performer= perf_row[0]
-            performers.append(performer)
-            total_img+= len(performer.images)
-        
-        t= progress.tqdm(range(total_img), desc='Processing...', total=total_img, unit='image')
-        
-        for performer in performers:
-            for img in performer.images:
-                t.update()
-                if not img.original_file_exists():
-                    continue
-                img_file: ImgFile= img.original_file()
-                analysis: ImageAnalysis= image_analysis(img_file, radio_deepface_detector, number_deepface_extends, session)
-                face: DeepfaceFace
-                for face in analysis.faces:
-                    if face.overlapping:
-                        continue
-                    if face.confidence < number_deepface_min_confidence:
-                        if face.performer is not None:
-                            face.performer= None
-                            session.add(face)
-                        continue
-                    if face.performer != performer:
-                        face.performer= performer
-                        session.add(face)
-                    src=get_face_image_path(face)
-                    dest_file= dataset_dir.joinpath(src.name)
-                    shutil.copy(src, dest_file)
-                    index.append(face.id)
-                    data.append((face.performer.id, 
-                                 face.performer.name, 
-                                 img_file.id, 
-                                 face.group, 
-                                 face.confidence, 
-                                 f"<img style='max-height: 75px;' src='/gradio_api/file={img_file.get_image_path()}'/>",                                  
-                                 f"<img style='max-height: 75px;' src='/gradio_api/file={src}'/>", 
-                                 face.status.value, 
-                                 f"{face.w}x{face.h}",
-                                 face.age, 
-                                 face.gender, 
-                                 face.gender_confidence,
-                                 face.race,
-                                 face.race_confidence))
-        session.commit()
-    return pd.DataFrame(data=data, index=index, columns=columns).to_html(escape=False)
-    
-
-def handler_batch_deepface_analysis(radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, progress= gr.Progress()):
-    logger.info(f"handler_complete_deepface_analysis detector {radio_deepface_detector} face expand {number_deepface_extends}")
-    columns=["Performer Id", "Performer Name", "ImgFile Id", "Group", "Confidence", "Image", "Face", "Status", "Size", "Age", "Gender", "Gender conf.", "Race", "Race conf."]    
-    data= []
-    index= []
-    performers= []
-    total_img= 0
-    with get_session() as session:
-
-        performer: Performer
-        for perf_row in session.execute(select(Performer)).fetchall():
-            performer= perf_row[0]
-            performers.append(performer)
-            total_img+= len(performer.images)
-        
-        #progress((0, total_img), desc='Processing...', total=total_img, unit='image')
-        t= progress.tqdm(range(total_img), desc='Processing...', total=total_img, unit='image')
-        for performer in performers:
-            for img in performer.images:
-                t.update()
-                if not img.original_file_exists():
-                    continue
-                img_file: ImgFile= img.original_file()
-                analysis: ImageAnalysis= image_analysis(img_file, radio_deepface_detector, number_deepface_extends, session)
-                face: DeepfaceFace
-                for face in analysis.faces:
-                    if face.overlapping:
-                        continue
-                    if face.confidence < number_deepface_min_confidence and face.status in [FaceStatus.DISCOVERED, FaceStatus.AUTO_CONFIRMED]:
-                        face.status= FaceStatus.AUTO_DISCARD
-                        
-                    if face.status in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
-                        face_border_color= "#F3360D"
-                    elif face.status == FaceStatus.CONFIRMED:
-                        face_border_color= "#30F30D"
-                    else:
-                        face_border_color= "#1FA207"
-                    index.append(face.id)
-                    data.append((performer.id, 
-                                 performer.name, 
-                                 img_file.id, 
-                                 face.group, 
-                                 face.confidence, 
-                                 f"<img style='max-height: 75px;' src='/gradio_api/file={img_file.get_image_path()}'/>",                                  
-                                 f"<img style='max-height: 75px; border: 2px solid {face_border_color}' src='/gradio_api/file={get_face_image_path(face)}'/>", 
-                                 face.status.value, 
-                                 f"{face.w}x{face.h}",
-                                 face.age, 
-                                 face.gender, 
-                                 face.gender_confidence, 
-                                 face.race, 
-                                 face.race_confidence))
-        
-    return pd.DataFrame(data=data, index=index, columns=columns).to_html(escape=False)
-
-def handler_complete_deepface_analysis(performer_id, state_performer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence):
-    logger.info(f"handler_complete_deepface_analysis Performer id {performer_id} Current state : {state_performer_stash}")    
-    logger.info(f"handler_complete_deepface_analysis detector {radio_deepface_detector} face expand {number_deepface_extends}")
-    columns=["ImgFile Id", "Group", "Confidence", "Pic", "Face", "Status", "Size", "Age", "Gender", "Gender conf.", "Race", "Race conf."]    
-    data= []
-    index= []
-    with get_session() as session:
-        performer: Performer= load_performer(performer_id, session)
-        if performer is None:
-            gr.Warning(f"Unable to load performer {performer_id}")
-            return None
-
-        for img in performer.images:
-            if not img.original_file_exists():
-                continue
-            img_file: ImgFile= img.original_file()
-            analysis: ImageAnalysis= image_analysis(img_file, radio_deepface_detector, number_deepface_extends, session)
-            face: DeepfaceFace
-            for face in analysis.faces:
-                if face.overlapping:
-                    continue
-                if face.confidence < number_deepface_min_confidence and face.status in [FaceStatus.DISCOVERED, FaceStatus.AUTO_CONFIRMED]:
-                    face.status= FaceStatus.AUTO_DISCARD
-                index.append(face.id)
-                data.append((img_file.id, 
-                             face.group, 
-                             face.confidence, 
-                             f"<img style='max-height: 75px;' src='/gradio_api/file={img_file.get_image_path()}'/>", 
-                             f"<img style='max-height: 75px;' src='/gradio_api/file={get_face_image_path(face)}'/>", 
-                             face.status.value,
-                             f"{face.w}x{face.h}",
-                             face.age, 
-                             face.gender, 
-                             face.gender_confidence, 
-                             face.race, 
-                             face.race_confidence))
-        
-    return pd.DataFrame(data=data, index=index, columns=columns).to_html(escape=False)
-#                                            inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence],
-def deepface_analysis(performer_id, state_performer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, force):
-    logger.debug(f"deepface_analysis Current state : {type(state_performer_stash)} : {state_performer_stash}")    
-    #TODO Find why it become a list
-    if isinstance(state_performer_stash, list):
-        state_performer_stash= state_performer_stash[0]
-    logger.info(f"deepface_analysis index {state_performer_stash.get("current_index")}")
-    if not performer_id:
-        gr.Warning(f"Invalid state, reload performer.")
-        return [state_performer_stash, None, None, None]
-
-    if state_performer_stash.get("image_ids") is None or len(state_performer_stash.get("image_ids")) < (state_performer_stash.get("current_index", -1)+1):
-        gr.Warning(f"Invalid selection. Select an image from the stash images.")
-        return [state_performer_stash, None, None, None]
-    faces= []
-    orig_img= None
-    annotated_img= None
-    with get_session() as session:
-        img_file: ImgFile= None
-        performer: Performer= load_performer(performer_id, session)
-        if state_performer_stash.get("current_index", -1) == -1:
-            gr.Info("Using main image")
-            if not performer.main_image.original_file_exists():
-                gr.Warning(f"Main performer file not on disk")
-                return [state_performer_stash, None, None, None]
-            img_file= performer.main_image.original_file()
-        else:
-            image_id= state_performer_stash.get("image_ids")[state_performer_stash.get("current_index")]
-            logger.debug(f"Image id: {image_id}")
-            img_file= session.get(ImgFile, image_id)
-            if not img_file.exists():
-                gr.Warning(f"ImgFile id {image_id} {img_file} not on disk")
-                return [state_performer_stash, None, None, None]
-            
-        analysis: ImageAnalysis= image_analysis(img_file, radio_deepface_detector, number_deepface_extends, session, force) 
-        face: DeepfaceFace
-        for face in analysis.faces:
-            if face.overlapping:
-                continue
-            faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))            
-        orig_img= img_file.get_image_path()
-        annotated_img= get_annotated_image_analysis_path(analysis, number_deepface_min_confidence)
-        
-    return [state_performer_stash, orig_img, annotated_img, faces]
-    #outputs=[state_peformer_stash, img_performer, img_performer_overly, gallery_faces]
-
-def main_image_selection(state_performer_stash, evt: gr.SelectData):
-    logger.info(f"stash_image_selection : Index : {evt.index} Image ids list size : {len(state_performer_stash.get("image_ids", []))}")
-    logger.debug(f"stash_main_image_selectionimage_selection Current state : {type(state_performer_stash)} : {state_performer_stash}")
-    
-    state_performer_stash["current_index"]= -1
-    logger.debug(f"end stash_main_image_selectionimage_selection Current state : {type(state_performer_stash)} : {state_performer_stash}")    
-    return [state_performer_stash]
-
-def stash_image_selection(state_performer_stash, evt: gr.SelectData):
-    logger.info(f"stash_image_selection : Index : {evt.index} Image ids list size : {len(state_performer_stash.get("image_ids", []))}")
-    logger.debug(f"stash_image_selection Current state : {type(state_performer_stash)} : {state_performer_stash}")
-    
-    if len(state_performer_stash.get("image_ids", [])) < evt.index:
-        gr.Warning("**Invalid state could not populate from images. Reload the performer.")
-        return [state_performer_stash]
-    state_performer_stash["current_index"]= evt.index
-    logger.debug(f"end stash_image_selection Current state : {type(state_performer_stash)} : {state_performer_stash}")    
-    return [state_performer_stash]
-
 def performer_gallery_select(ids, evt: gr.SelectData):
     if evt.index > len(ids):
         gr.Warning("State invalid, could not retrieve selected image")
         return [ids[evt.index], gr.Tabs(selected=10)]
     logger.info(f"Performer id selected : {ids[evt.index]}")
     return [str(ids[evt.index]), gr.Tabs(selected="performer_stash_tab")]
-    
+
+def update_face_status(face_id: int, face_status: str):
+    logger.warning(f"update_face_status FaceId: {face_id} Status: {face_status} {FaceStatus(face_status)}")
+    with get_session() as session:
+        face= session.get(DeepfaceFace, face_id)
+        face.status= FaceStatus(face_status)
+        session.add(face)
+        session.commit()
+   
 def stash_performers_tab():
     with gr.Tab("Performers", id="performer_main_tab") as performers_tab:
         state_search_performer= gr.BrowserState([])
@@ -387,8 +164,8 @@ def stash_performers_tab():
                                     btn_load_performer_id= gr.Button(value='', icon='assets/load.ico', min_width=64)
                 with gr.Row():
                     with gr.Column():
-                        img_performer_main= gr.Image(label='Main image')
-                        gallery_performer_stash_images= gr.Gallery(label='Stash Images', object_fit='contain')
+                        img_performer_main= gr.Image(label='Main image', interactive=False)
+                        # gallery_performer_stash_images= gr.Gallery(label='Stash Images', object_fit='contain')
                     with gr.Column(scale=5):
                         with gr.Accordion(label="Dev", open=False):
                             json_performer= gr.Json(label="Stash box")
@@ -398,55 +175,131 @@ def stash_performers_tab():
                             with gr.Group():
                                 txt_performer_stashes= gr.Textbox(label='Stash box', interactive=False)
                                 btn_download_images_from_stash_box= gr.Button(value= 'Download images from stash box', icon='assets/download.png', min_width=60)
-                        with gr.Row():
-                            with gr.Column(scale=2):
-                                radio_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib", "ssd", "opencv"], value="ssd", label='Detector')
-                            with gr.Column(scale=1):
-                                number_deepface_extends= gr.Number(label= "Extends % face detection", value=30)
-                            with gr.Column(scale=1):
-                                number_deepface_min_confidence= gr.Number(value=0.9, maximum=1, step=0.01, label="Minimum confidence")
-                            # radio_deepface_analysis= gr.Radio(choices=["gender", "race", "emotion"],
-                            #                                                                     value="gender",
-                            #                                                                     label="Attributes",
-                            #                                                                     info="Select an Attribute to Analyze")
-                        with gr.Tabs():
-                            with gr.Tab("Single file"):
+                            number_deepface_min_confidence= gr.Number(value=0.9, maximum=1, step=0.01, label="Minimum confidence")
+                        @gr.render(inputs= [txt_current_performer_id, number_deepface_min_confidence],
+                                   triggers=[btn_load_performer_id.click, txt_current_performer_id.change, btn_download_images_from_stash_box.click])
+                        def render_images(performer_id, min_confidence):
+                            with get_session(expire_on_commit=False) as session:
+                                performer: Performer= load_performer(performer_id, session)
+                                logger.debug(f"render_images Performer loaded : {performer}")
+                                if performer is None:
+                                    raise gr.Error(f"Unable to load perfomer {performer_id}")
                                 with gr.Row():
-                                    with gr.Column():
-                                        btn_deepface_analysis= gr.Button(value='Deep face analysis', variant='primary')
-                                        chk_force_analysis= gr.Checkbox(label="Force", value=False)
-                                with gr.Row():
-                                    with gr.Column(scale=1):
-                                        img_performer= gr.Image()
-                                    with gr.Column(scale=3):
-                                        img_performer_overly= gr.Image()
-                                    with gr.Column(scale=1):
-                                        gallery_faces= gr.Gallery(label='Face(s)', rows=1)
-                            with gr.Tab("Complete performer analysis"):
-                                with gr.Row():
-                                    with gr.Column():
-                                        btn_deepface_analysis_global= gr.Button(value='Deep face analysis', variant='primary')
-                                with gr.Row():
-                                    with gr.Column():
-                                        #df_face_results= gr.DataFrame()
-                                        df_face_results= gr.HTML()
+                                    gr.HTML(value=f"<p>Detector : {config.face_recognition_model} face expands {config.expand_face} %</p>")
+                                for img in performer.images:
+                                    if img.image_type == ImageType.STASH_BOX_PERFORMER or img.phash == performer.main_image_phash:
+                                        if not img.original_file_exists():
+                                            logger.warning(f"Image not on disk {img.phash}")
+                                            continue
+                                        img_file= img.original_file()
+                                        analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=config.expand_face, session=session)
+                                        with gr.Row():
+                                            with gr.Column():
+                                                with gr.Group():
+                                                    with gr.Column():
+                                                        gr.Image(height="250px", value=img_file.get_image_path().resolve())
+                                                        gr.HTML(value=f"<p>Size {img_file.width}x{img_file.height}</p>")
+                                            with gr.Column():
+                                                gr.Image(height="250px", value=get_annotated_image_analysis_path(analysis, min_confidence))
+                                            with gr.Column():
+                                                for face in analysis.faces:
+                                                    txt_face_id= gr.Text(visible=False, value=face.id)
+                                                    with gr.Group():
+                                                        with gr.Row():
+                                                            gr.Image(value=get_face_image_path(face), height="250px")
+                                                        with gr.Row():
+                                                            dd_face_status= gr.Dropdown(choices=[s.value for s in FaceStatus], value=face.status.value, label='Face status')
+                                                            dd_face_status.change(update_face_status, inputs=[txt_face_id, dd_face_status])
+                                                        with gr.Row():
+                                                            gr.HTML(value=f"""
+                                                                    <p>Size {face.w}x{face.h}</p>
+                                                                    <p>Confidence : {round(face.confidence, 3)}</p>
+                                                                    <p>{face.age} yo
+                                                                    {face.race} ({round(face.race_confidence, 3)})
+                                                                    {face.gender} ({round(face.gender_confidence,3)})
+                                                                    </p>
+                                                                    """)
+                                session.commit()
             with gr.Tab("Batch operation", id="performer_batch_tab"):
                 with gr.Accordion(label="Update data", open=False):
                     btn_update_downloaded= gr.Button(value='Update all downloaded performers')
                     btn_download_all_stashbox_images= gr.Button(icon='assets/download.png', value='Download all images from stashbox for all performers')
                     html_result_batch= gr.HTML() 
                 with gr.Row():
-                    with gr.Column(scale=2):
-                        radio_batch_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib", "ssd", "opencv"], value="ssd", label='Detector')
-                    with gr.Column(scale=1):
-                        number_batch_deepface_expand= gr.Number(label= "Expand % face detection", value=30)
                     with gr.Column(scale=1):
                         number_batch_deepface_min_confidence= gr.Number(value=0.9, maximum=1, step=0.01, label="Minimum confidence")
                 with gr.Row():
+                    chk_create_dataset= gr.Checkbox(label='Create dataset', value=False)
                     btn_deepface_analysis_batch= gr.Button(value='Deep face analysis', variant='primary')
-                    btn_batch_create_dataset= gr.Button(value='Create dataset', variant='primary')
                 with gr.Row():
-                    df_batch_face_results= gr.HTML(value="<h1>Batch result</h1>")
+                    with gr.Column():
+                        @gr.render(inputs= [number_batch_deepface_min_confidence, chk_create_dataset], triggers=[btn_deepface_analysis_batch.click])
+                        def render_images_all(min_confidence, create_dataset):
+                            logger.info("Render all performers")
+                            if create_dataset:
+                                dataset_dir= config.data_dir.joinpath('dataset/performers')
+                                if dataset_dir.exists():
+                                    shutil.rmtree(dataset_dir)
+                                dataset_dir.mkdir(parents=True)                            
+                            with get_session() as session:
+                                performer: Performer
+                                for perf_row in session.execute(select(Performer)).fetchall():
+                                    performer= perf_row[0]
+                                    logger.info(f"render_images (all) Performer loaded : {performer}")
+                                    with gr.Row():
+                                        with gr.Column():
+                                            gr.HTML(value=f"<hr/><h2>[{performer.id}] {performer.name}</h2>")
+                                    for img in performer.images:
+                                        if img.image_type == ImageType.STASH_BOX_PERFORMER or img.phash == performer.main_image_phash:
+                                            if not img.original_file_exists():
+                                                logger.warning(f"Image not on disk {img.phash}")
+                                                continue
+                                            img_file= img.original_file()
+                                            analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=config.expand_face, session=session)
+                                            with gr.Row():
+                                                with gr.Column():
+                                                    with gr.Group():
+                                                        with gr.Column():
+                                                            gr.Image(height="100px", value=img_file.get_image_path().resolve())
+                                                            gr.HTML(value=f"<p>Size {img_file.width}x{img_file.height}</p>")
+                                                with gr.Column():
+                                                    gr.Image(height="100px", value=get_annotated_image_analysis_path(analysis, min_confidence))
+                                                with gr.Column():
+                                                    for face in analysis.faces:
+                                                        txt_face_id= gr.Text(visible=False, value=face.id)
+                                                        in_dataset= True
+                                                        if face.confidence < min_confidence and face.status not in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
+                                                            face.status= FaceStatus.AUTO_DISCARD
+                                                            session.add(face)
+                                                                                                                    
+                                                        if face.status in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
+                                                            face_border_color= "#F3360D"
+                                                            in_dataset= False
+                                                        elif face.status == FaceStatus.CONFIRMED:
+                                                            face_border_color= "#30F30D"
+                                                        else:
+                                                            face_border_color= "#1FA207" 
+                                                        if create_dataset and in_dataset:
+                                                            src=get_face_image_path(face)
+                                                            dest_file= dataset_dir.joinpath(src.name)
+                                                            shutil.copy(src, dest_file)                                                                                                                   
+                                                        with gr.Group():
+                                                            with gr.Row():
+                                                                gr.Image(value=get_face_image_path(face), height="100px")
+                                                            with gr.Row():
+                                                                dd_face_status= gr.Dropdown(choices=[s.value for s in FaceStatus], value=face.status.value, label='Face status')
+                                                                dd_face_status.change(update_face_status, inputs=[txt_face_id, dd_face_status])
+                                                            with gr.Row():
+                                                                gr.HTML(value=f"""
+                                                                        <p style='color: {face_border_color};'>Size {face.w}x{face.h}</p>
+                                                                        <p style='color: {face_border_color};'>Confidence : {round(face.confidence, 3)}</p>
+                                                                        <p style='color: {face_border_color};'>{face.age} yo
+                                                                        {face.race} ({round(face.race_confidence, 3)})
+                                                                        {face.gender} ({round(face.gender_confidence,3)})
+                                                                        </p>
+                                                                        """)
+                                session.commit()
+
                                        
         btn_refresh_performer_id.click(handler_btn_refresh_performer_id, inputs=[dd_performer_id], outputs=[dd_performer_id])                
         btn_search_performer_name.click(search_performer_by_name, 
@@ -462,55 +315,20 @@ def stash_performers_tab():
                                         outputs=[dd_performer_id, performers_tabs]
                                         ).then(display_performer, 
                                                inputs=[state_peformer_stash, dd_performer_id], 
-                                               outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
+                                               outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, state_peformer_stash]
                                                )
         btn_load_performer_id.click(display_performer, 
                                     inputs=[state_peformer_stash, dd_performer_id], 
-                                    outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
+                                    outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, state_peformer_stash]
                                     )
-        # .then(deepface_analysis,
-        #                                      inputs=[state_peformer_stash, radio_deepface_analysis],
-        #                                      outputs=[state_peformer_stash, img_performer, plot_analysis, dataframe_analysis]
-        #                                      )
         dd_performer_id.select(display_performer, 
                                 inputs=[state_peformer_stash, dd_performer_id], 
-                                outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, gallery_performer_stash_images, state_peformer_stash, img_performer]
+                                outputs=[txt_current_performer_id, img_performer_main, txt_performer_name, txt_performer_stashes, json_performer, state_peformer_stash]
                                 )
-        # .then(deepface_analysis,
-        #                                      inputs=[state_peformer_stash, radio_deepface_analysis],
-        #                                      outputs=[state_peformer_stash, img_performer, plot_analysis, dataframe_analysis]
-        #                                      )
         btn_download_images_from_stash_box.click(download_images_from_stash_box, 
                                                 inputs=[txt_current_performer_id, state_peformer_stash], 
-                                                outputs=[gallery_performer_stash_images, state_peformer_stash]
+                                                outputs=[state_peformer_stash]
                                                 )
-        img_performer_main.select(main_image_selection, 
-                                    inputs=[state_peformer_stash], 
-                                    outputs=[state_peformer_stash]
-                                    ).then(deepface_analysis,
-                                            inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence],
-                                            outputs=[state_peformer_stash, img_performer, img_performer_overly, gallery_faces]
-                                            )
-        gallery_performer_stash_images.select(stash_image_selection, 
-                                    inputs=[state_peformer_stash], 
-                                    outputs=[state_peformer_stash]
-                                    ).then(deepface_analysis,
-                                            inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence],
-                                            outputs=[state_peformer_stash, img_performer, img_performer_overly, gallery_faces]
-                                            )
-        btn_deepface_analysis.click(deepface_analysis,
-                                    inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, chk_force_analysis],
-                                    outputs=[state_peformer_stash, img_performer, img_performer_overly, gallery_faces]
-                                    )
-        btn_deepface_analysis_global.click(handler_complete_deepface_analysis,
-                                           inputs=[txt_current_performer_id, state_peformer_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence],
-                                           outputs=[df_face_results])
-        btn_deepface_analysis_batch.click(handler_batch_deepface_analysis,
-                                           inputs=[radio_batch_deepface_detector, number_batch_deepface_expand, number_batch_deepface_min_confidence],
-                                           outputs=[df_batch_face_results])
-        btn_batch_create_dataset.click(handler_batch_create_dataset,
-                                           inputs=[radio_batch_deepface_detector, number_batch_deepface_expand, number_batch_deepface_min_confidence],
-                                           outputs=[df_batch_face_results])
         btn_update_downloaded.click(update_all_performers, inputs=None, outputs=html_result_batch)
         btn_download_all_stashbox_images.click(download_all_stash_images, None, html_result_batch)
 
