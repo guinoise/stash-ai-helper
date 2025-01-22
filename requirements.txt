@@ -17,4 +17,10 @@ dlib
 mediapipe
 ultralytics
 decord
-#nvidia-cudnn-cu12~=9.3
+diffusers 
+transformers 
+accelerate 
+scipy 
+safetensors
+git+https://github.com/sberbank-ai/Real-ESRGAN.git
+huggingface_hub==0.25
