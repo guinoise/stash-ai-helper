@@ -37,7 +37,23 @@ def download_all_stash_images(current_session: Session= None, progress=gr.Progre
     if current_session is None:
         session.commit()
 
+def sync_all_performers(current_session: Session= None, progress=gr.Progress(track_tqdm=True)):
+    logger.info(f"sync_all_performers")
+    if current_session is None:
+        session= get_session()
+    else:
+        session= current_session
 
+    ids= []    
+    for stash_performer in config.stash_interface.find_performers():
+        ids.append(stash_performer.get('id'))
+        
+    for id in tqdm(ids, desc='Updating', unit='performer'):
+        create_or_update_performer_from_stash(id, None, session)
+    
+    if current_session is None:
+        session.commit()
+    
 def update_all_performers(current_session: Session= None, progress=gr.Progress(track_tqdm=True)):
     logger.info(f"update_all_performers")
     if current_session is None:

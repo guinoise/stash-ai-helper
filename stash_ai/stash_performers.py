@@ -7,7 +7,7 @@ from stash_ai.config import config
 from stash_ai.model import StashBox, Performer, PerformerStashBoxImage, Img, ImgFile, ImageAnalysis, DeepfaceFace, FaceStatus, ImageType
 from stash_ai.db import get_session
 from utils.performer import get_performer_stash_image, create_or_update_performer_from_stash, load_performer, download_stash_box_images_for_performer, get_downloaded_stash_box_images_for_performer, update_all_performers
-from utils.performer import download_all_stash_images
+from utils.performer import download_all_stash_images, sync_all_performers
 from utils.image import image_analysis, get_annotated_image_analysis_path, get_face_image_path, get_face_phash, hashes_are_similar
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +16,23 @@ import shutil
 import re
 
 FULL_SEARCH_ALLOWED=False
+
+def handle_upscale_face(face_id: int):
+    html= ""
+    with get_session() as session:
+        face= session.get(DeepfaceFace, face_id)
+        # face.status= FaceStatus(face_status)
+        session.add(face)
+        session.commit()    
+        # html= f"""
+        #         <p style='color: {face_border_color};'>Size {face.w}x{face.h}</p>
+        #         <p style='color: {face_border_color};'>Confidence : {round(face.confidence, 3)}</p>
+        #         <p style='color: {face_border_color};'>{face.age} yo
+        #         {face.race} ({round(face.race_confidence, 3)})
+        #         {face.gender} ({round(face.gender_confidence,3)})
+        #         </p>
+        #         """
+    return [None, html]
 
 def download_images_from_stash_box(performer_id, state_peformer_stash):
     logger.info(f"Download images from stashbox for performer {performer_id}")
@@ -130,6 +147,7 @@ def update_face_status(face_id: int, face_status: str):
         face.status= FaceStatus(face_status)
         session.add(face)
         session.commit()
+        return get_face_image_path(face)
    
 def stash_performers_tab():
     with gr.Tab("Performers", id="performer_main_tab") as performers_tab:
@@ -192,7 +210,7 @@ def stash_performers_tab():
                                             logger.warning(f"Image not on disk {img.phash}")
                                             continue
                                         img_file= img.original_file()
-                                        analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=config.expand_face, session=session)
+                                        analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=200, session=session)
                                         with gr.Row():
                                             with gr.Column():
                                                 with gr.Group():
@@ -206,10 +224,7 @@ def stash_performers_tab():
                                                     txt_face_id= gr.Text(visible=False, value=face.id)
                                                     with gr.Group():
                                                         with gr.Row():
-                                                            gr.Image(value=get_face_image_path(face), height="250px")
-                                                        with gr.Row():
-                                                            dd_face_status= gr.Dropdown(choices=[s.value for s in FaceStatus], value=face.status.value, label='Face status')
-                                                            dd_face_status.change(update_face_status, inputs=[txt_face_id, dd_face_status])
+                                                            img_face= gr.Image(value=get_face_image_path(face), height="250px")
                                                         with gr.Row():
                                                             gr.HTML(value=f"""
                                                                     <p>Size {face.w}x{face.h}</p>
@@ -219,22 +234,27 @@ def stash_performers_tab():
                                                                     {face.gender} ({round(face.gender_confidence,3)})
                                                                     </p>
                                                                     """)
+                                                        with gr.Row():
+                                                            dd_face_status= gr.Dropdown(choices=[s.value for s in FaceStatus], value=face.status.value, label='Face status')
+                                                            dd_face_status.change(update_face_status, inputs=[txt_face_id, dd_face_status], outputs=[img_face])
                                 session.commit()
             with gr.Tab("Batch operation", id="performer_batch_tab"):
                 with gr.Accordion(label="Update data", open=False):
+                    btn_sync_performers= gr.Button(value='Sync all performers from stash')
                     btn_update_downloaded= gr.Button(value='Update all downloaded performers')
                     btn_download_all_stashbox_images= gr.Button(icon='assets/download.png', value='Download all images from stashbox for all performers')
-                    html_result_batch= gr.HTML() 
+                    html_result_batch= gr.HTML("<h1>Batch progress</h1>") 
                 with gr.Row():
                     with gr.Column(scale=1):
                         number_batch_deepface_min_confidence= gr.Number(value=0.9, maximum=1, step=0.01, label="Minimum confidence")
                 with gr.Row():
                     chk_create_dataset= gr.Checkbox(label='Create dataset', value=False)
                     btn_deepface_analysis_batch= gr.Button(value='Deep face analysis', variant='primary')
+                    btn_validate= gr.Button(value="Validate next 10 performers")
                 with gr.Row():
                     with gr.Column():
-                        @gr.render(inputs= [number_batch_deepface_min_confidence, chk_create_dataset], triggers=[btn_deepface_analysis_batch.click])
-                        def render_images_all(min_confidence, create_dataset):
+                        @gr.render(inputs= [number_batch_deepface_min_confidence, chk_create_dataset], triggers=[btn_validate.click])
+                        def validate_performers(min_confidence, create_dataset):
                             logger.info("Render all performers")
                             if create_dataset:
                                 dataset_dir= config.data_dir.joinpath('dataset/performers')
@@ -242,62 +262,89 @@ def stash_performers_tab():
                                     shutil.rmtree(dataset_dir)
                                 dataset_dir.mkdir(parents=True)                            
                             with get_session() as session:
+                                performer_count= 0
                                 performer: Performer
                                 for perf_row in session.execute(select(Performer)).fetchall():
                                     performer= perf_row[0]
                                     logger.info(f"render_images (all) Performer loaded : {performer}")
-                                    with gr.Row():
-                                        with gr.Column():
-                                            gr.HTML(value=f"<hr/><h2>[{performer.id}] {performer.name}</h2>")
+                                    faces= []
                                     for img in performer.images:
                                         if img.image_type == ImageType.STASH_BOX_PERFORMER or img.phash == performer.main_image_phash:
                                             if not img.original_file_exists():
                                                 logger.warning(f"Image not on disk {img.phash}")
                                                 continue
                                             img_file= img.original_file()
-                                            analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=config.expand_face, session=session)
-                                            with gr.Row():
-                                                with gr.Column():
-                                                    with gr.Group():
-                                                        with gr.Column():
-                                                            gr.Image(height="100px", value=img_file.get_image_path().resolve())
-                                                            gr.HTML(value=f"<p>Size {img_file.width}x{img_file.height}</p>")
-                                                with gr.Column():
-                                                    gr.Image(height="100px", value=get_annotated_image_analysis_path(analysis, min_confidence))
-                                                with gr.Column():
-                                                    for face in analysis.faces:
-                                                        txt_face_id= gr.Text(visible=False, value=face.id)
-                                                        in_dataset= True
-                                                        if face.confidence < min_confidence and face.status not in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
-                                                            face.status= FaceStatus.AUTO_DISCARD
-                                                            session.add(face)
-                                                                                                                    
-                                                        if face.status in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
-                                                            face_border_color= "#F3360D"
-                                                            in_dataset= False
-                                                        elif face.status == FaceStatus.CONFIRMED:
-                                                            face_border_color= "#30F30D"
-                                                        else:
-                                                            face_border_color= "#1FA207" 
-                                                        if create_dataset and in_dataset:
-                                                            src=get_face_image_path(face)
-                                                            dest_file= dataset_dir.joinpath(src.name)
-                                                            shutil.copy(src, dest_file)                                                                                                                   
-                                                        with gr.Group():
-                                                            with gr.Row():
-                                                                gr.Image(value=get_face_image_path(face), height="100px")
-                                                            with gr.Row():
-                                                                dd_face_status= gr.Dropdown(choices=[s.value for s in FaceStatus], value=face.status.value, label='Face status')
-                                                                dd_face_status.change(update_face_status, inputs=[txt_face_id, dd_face_status])
-                                                            with gr.Row():
-                                                                gr.HTML(value=f"""
-                                                                        <p style='color: {face_border_color};'>Size {face.w}x{face.h}</p>
-                                                                        <p style='color: {face_border_color};'>Confidence : {round(face.confidence, 3)}</p>
-                                                                        <p style='color: {face_border_color};'>{face.age} yo
-                                                                        {face.race} ({round(face.race_confidence, 3)})
-                                                                        {face.gender} ({round(face.gender_confidence,3)})
-                                                                        </p>
-                                                                        """)
+                                            analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=200, session=session)
+                                            for face in analysis.faces:
+                                                if face.status == FaceStatus.DISCOVERED:
+                                                    if face.confidence < min_confidence and face.status not in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
+                                                        face.status= FaceStatus.AUTO_DISCARD
+                                                        session.add(face)
+                                                    faces.append(face)
+                                    if len(faces) == 0:
+                                        continue
+                                    
+                                    with gr.Row():
+                                        with gr.Column():
+                                            gr.HTML(value=f"<hr/><h2>[{performer.id}] {performer.name}</h2>")
+                                    with gr.Row():
+                                        face: DeepfaceFace
+                                        for face in faces:
+                                            txt_face_id= gr.Text(visible=False, value=face.id)
+                                            in_dataset= True
+                                            if face.confidence < min_confidence and face.status not in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
+                                                face.status= FaceStatus.AUTO_DISCARD
+                                                session.add(face)
+                                                                                                        
+                                            if face.status in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
+                                                face_border_color= "#F3360D"
+                                                in_dataset= False
+                                            elif face.status == FaceStatus.CONFIRMED:
+                                                face_border_color= "#30F30D"
+                                            else:
+                                                face_border_color= "#1FA207" 
+                                            if create_dataset and in_dataset:
+                                                src=get_face_image_path(face)
+                                                dest_file= dataset_dir.joinpath(src.name)
+                                                shutil.copy(src, dest_file)                                                                                                                   
+                                            with gr.Group():
+                                                with gr.Row():
+                                                    img_face= gr.Image(value=get_face_image_path(face), height="150")
+                                                with gr.Row():
+                                                    face_html= gr.HTML(value=f"""
+                                                            <p style='color: {face_border_color};'>Size {face.w}x{face.h}</p>
+                                                            <p style='color: {face_border_color};'>Confidence : {round(face.confidence, 3)}</p>
+                                                            <p style='color: {face_border_color};'>{face.age} yo
+                                                            {face.race} ({round(face.race_confidence, 3)})
+                                                            {face.gender} ({round(face.gender_confidence,3)})
+                                                            </p>
+                                                            """)
+                                                with gr.Row():
+                                                    dd_face_status= gr.Dropdown(choices=[s.value for s in FaceStatus], value=face.status.value, label='Face status')
+                                                    dd_face_status.change(update_face_status, inputs=[txt_face_id, dd_face_status], outputs=[img_face])
+                                                with gr.Row():
+                                                    btn_confirm= gr.Button(value='Confirm', variant='primary')
+                                                    btn_upscale= gr.Button(value='Upscale', variant='huggingface')
+                                                    btn_discard= gr.Button(value='Discard', variant='stop')
+                                                    def handle_confirm():
+                                                        return gr.Dropdown(value=FaceStatus.CONFIRMED.value)
+                                                    def handle_upscale():
+                                                        return gr.Dropdown(value=FaceStatus.UPSCALE.value)
+                                                    def handle_discard():
+                                                        return gr.Dropdown(value=FaceStatus.DISCARD.value)
+                                                    btn_confirm.click(handle_confirm, outputs=dd_face_status)
+                                                    btn_upscale.click(handle_upscale, outputs=dd_face_status)
+                                                    btn_discard.click(handle_discard, outputs=dd_face_status)
+                                                    # btn_upscale= gr.Button(value='Upscale')
+                                                    # btn_upscale.click(handle_upscale_face, inputs=[txt_face_id], outputs=[img_face, face_html])
+                                    performer_count+= 1
+                                    if performer_count == 10:
+                                        with gr.Row():
+                                            gr.Label(value="More performers to validate")
+                                        break
+                                else:
+                                    with gr.Row():
+                                        gr.Label(value="Complete")
                                 session.commit()
 
                                        
@@ -329,6 +376,7 @@ def stash_performers_tab():
                                                 inputs=[txt_current_performer_id, state_peformer_stash], 
                                                 outputs=[state_peformer_stash]
                                                 )
+        btn_sync_performers.click(sync_all_performers, inputs=None, outputs=html_result_batch)
         btn_update_downloaded.click(update_all_performers, inputs=None, outputs=html_result_batch)
         btn_download_all_stashbox_images.click(download_all_stash_images, None, html_result_batch)
 

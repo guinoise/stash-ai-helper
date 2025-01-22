@@ -22,9 +22,11 @@ class ImageType(enum.Enum):
 class FaceStatus(enum.Enum):
     DISCOVERED= "Discovered"
     CONFIRMED= "Confirmed"
+    UPSCALE= "Confirmed upscale"
     DISCARD= "Discard"
     AUTO_DISCARD= "Automatic discard"
     AUTO_CONFIRMED= "Automatic confirmed"
+    AUTO_UPSCALE= "Automatic upscale"
 
 class BaseModel(DeclarativeBase):
     pass
