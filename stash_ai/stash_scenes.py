@@ -9,7 +9,7 @@ from stash_ai.db import get_session
 from stash_ai.model import Performer, Scene, Img, ImgFile, ImageAnalysis, DeepfaceFace, FaceStatus
 from utils.performer import get_performer_stash_image, load_performer, get_unknown_performer_image
 from utils.scene import load_scene, create_or_update_scene_from_stash, extract_scene_images, decord_scene
-from utils.image import image_analysis, get_annotated_image_analysis_path, get_face_image_path, get_face_phash, hashes_are_similar, group_faces
+from utils.image import image_analysis, get_annotated_image_analysis_path, get_face_image_path, get_face_phash, hashes_are_similar, group_faces, load_image_analysis_from_imgFiles
 from datetime import timedelta
 import random
 from PIL import Image
@@ -18,8 +18,48 @@ from typing import List, Dict
 import pandas as pd
 import pathlib
 
-def handler_group_faces(state_scene_stash, radio_deepface_ident_detector, number_deepface_ident_expand, number_deepface_ident_face_conf, number_ident_hash_tolerance, radio_ident_model, number_limit_ident, progress=gr.Progress(track_tqdm=True)):
-    logger.info(f"handler_group_faces detector {radio_deepface_ident_detector} expand {number_deepface_ident_expand} min_confidence face {number_deepface_ident_face_conf} hash tolerance {number_ident_hash_tolerance} model {radio_ident_model}")
+def change_group_name(old_name, new_name, state_scene_stash): 
+    logger.info(f"Change group name from {old_name} to {new_name}")
+    with get_session() as session:
+        faces_list= state_scene_stash['groups'].pop(old_name, [])
+        if new_name in state_scene_stash['groups'].keys():
+            state_scene_stash['groups'][new_name]+= faces_list
+        else:
+            state_scene_stash['groups'][new_name]= faces_list
+        
+        for face_id in faces_list:
+            face= session.get(DeepfaceFace, face_id)
+            if face is None:
+                continue
+            face.group= new_name
+            session.add(face)
+        session.commit()
+    return state_scene_stash
+
+
+def update_face(face_id: int, face_status: str, face_group: str, state_scene_stash):
+    logger.warning(f"update_face_status FaceId: {face_id} Status: {face_status} {FaceStatus(face_status)} Group: {face_group}")
+    with get_session() as session:
+        face= session.get(DeepfaceFace, face_id)
+        face.status= FaceStatus(face_status)
+        if face.group != face_group:
+            if face.group:
+                state_scene_stash['groups'][face.group].remove(face.id)
+            else:
+                state_scene_stash['ungrouped'].remove(face.id)
+            if face_group:
+                if face_group not in state_scene_stash['groups'].keys():
+                    state_scene_stash['groups'][face_group]= [face.id]
+                else:
+                    state_scene_stash['groups'][face_group].append(face.id)        
+            face.group= face_group
+        session.add(face)
+        session.commit()
+    return state_scene_stash
+
+#inputs=[state_scene_stash, number_deepface_ident_face_conf, number_ident_hash_tolerance, number_limit_ident],
+def handler_group_faces(state_scene_stash, number_deepface_ident_face_conf, number_ident_hash_tolerance, progress=gr.Progress(track_tqdm=True)):
+    logger.info(f"handler_group_faces detector {config.face_identification_model} expand {config.expand_face} min_confidence face {number_deepface_ident_face_conf} hash tolerance {number_ident_hash_tolerance} model {config.face_identification_model}")
     logger.debug(f"handler_group_faces {state_scene_stash}")
     html= ""    
     with get_session() as session:
@@ -34,37 +74,42 @@ def handler_group_faces(state_scene_stash, radio_deepface_ident_detector, number
             if not img.original_file_exists():
                 logger.warning(f"detect_and_extract_faces File not on disk : {img}")
                 continue
-            analysis: ImageAnalysis= image_analysis(img.original_file(), radio_deepface_ident_detector, number_deepface_ident_expand, session)
+            analysis: ImageAnalysis= image_analysis(img.original_file(), config.face_recognition_model, config.expand_face, session)
 
             face: DeepfaceFace
             for face in analysis.faces:
                 if face.overlapping:
+                    face.status= FaceStatus.AUTO_DISCARD
+                    session.add(face)
                     continue
                 if face.status in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
                     continue
                 hash= get_face_phash(face)
                 if face.confidence < number_deepface_ident_face_conf:
+                    face.status= FaceStatus.AUTO_DISCARD
+                    session.add(face)
                     continue
                 for oh in faces_hashes:
                     if hashes_are_similar(hash, oh, number_ident_hash_tolerance):
+                        face.status= FaceStatus.AUTO_DISCARD
+                        session.add(face)
                         break
                 else:
                     faces.append(face)
                 faces_hashes.append(hash)
-            if number_limit_ident and len(faces) == number_limit_ident:
-                break
         
-        groups= group_faces(f"Scene {scene.id}", faces, detector_backend=radio_deepface_ident_detector, expand_percentage=number_deepface_ident_expand, model_name=radio_ident_model, session=session)
+        groups= group_faces(f"Scene {scene.id}", faces, detector_backend=config.face_recognition_model, expand_percentage=config.expand_face, model_name=config.face_identification_model, session=session)
+        state_scene_stash['groups']= {}
+        state_scene_stash['ungrouped']= []
+        for groupe_name, faces in groups.items():
+            for face in faces:
+                if groupe_name not in state_scene_stash['groups'].keys():
+                    state_scene_stash['groups'][groupe_name]= [face.id]
+                else:
+                    state_scene_stash['groups'][groupe_name].append(face.id)
         face: DeepfaceFace
-        html+= f"<table><tr><th>Group</th><th>Nb</th><th>Images</th></tr>"
-        for group_name, g_faces in groups.items():
-            html+= f"<tr><td>{group_name}</td><td>{len(g_faces)}</td><td><div style='display: flex; flex-wrap: wrap; align-items: left;'>"
-            for face in g_faces:
-                html+= f"face {face.id} <img style='max-height: 100px; margin: 0 10px 0 10px;' src='/gradio_api/file={get_face_image_path(face)}'/>"
-            html+= "</div></td></tr>"
-        html+= "</table><br/>"
         session.commit()
-    return html    
+    return state_scene_stash
     
 def ident_faces(state_scene_stash, radio_deepface_ident_detector, number_deepface_ident_expand, number_deepface_ident_face_conf, number_ident_hash_tolerance, radio_ident_model, number_limit_ident, progress=gr.Progress(track_tqdm=True)):
     logger.info(f"ident_faces detector {radio_deepface_ident_detector} expand {number_deepface_ident_expand} min_confidence face {number_deepface_ident_face_conf} hash tolerance {number_ident_hash_tolerance} model {radio_ident_model}")
@@ -175,8 +220,50 @@ def ident_faces(state_scene_stash, radio_deepface_ident_detector, number_deepfac
                 
     return df, html
 
-def detect_and_extract_faces(state_scene_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, checkbox_dryrun_face_detection, number_hash_tolerance, number_of_samples, progress=gr.Progress(track_tqdm=True)):
-    logger.info(f"detect_and_extract_faces state {state_scene_stash}, detector {radio_deepface_detector} expand {number_deepface_extends} min_confidence {number_deepface_min_confidence} dryrun {checkbox_dryrun_face_detection} nb samples {number_of_samples}, hash tolerance {number_hash_tolerance}")
+def render_detect_extract_faces(state_scene_stash, min_confidence, dryrun, hash_tolerance, number_of_samples, progress=gr.Progress(track_tqdm=True)):
+    logger.info(f"render_detect_extract_faces state {state_scene_stash}, detector {config.face_recognition_model} expand {config.expand_face} min_confidence {min_confidence} dryrun {dryrun} nb samples {number_of_samples}, hash tolerance {hash_tolerance}")
+
+    # if state_scene_stash.get('scene_id') is None:
+    #     gr.Warning("Current scene id not found. Reload the scene.")
+    #     return
+    # with get_session() as session:
+    #     scene: Scene= load_scene(state_scene_stash.get('scene_id'), session)
+    #     if scene is None:
+    #         raise gr.Error(f"Scene {state_scene_stash.get('scene_id')} not found in DB!")
+    #     imgs: List[Img]= []
+    #     if dryrun:
+    #         imgs= random.choices(scene.images, k=min(len(scene.images), number_of_samples))
+    #     else:
+    #         imgs= scene.images
+
+    #     img: Img            
+    #     for img in tqdm(imgs, desc='Processing...', unit='image'):
+    #         logger.debug(f"detect_and_extract_faces Detection on {img}")
+    #         if not img.original_file_exists():
+    #             logger.warning(f"detect_and_extract_faces File not on disk : {img}")
+    #             continue
+    #         analysis: ImageAnalysis= image_analysis(img.original_file(), config.face_recognition_model, config.expand_face, session)
+    #         gallery_face_dection.append(img.original_file().get_image_path())
+    #         gallery_face_dection.append(get_annotated_image_analysis_path(analysis, number_deepface_min_confidence))
+
+    #         face: DeepfaceFace
+    #         for face in analysis.faces:
+    #             if face.overlapping:
+    #                 continue
+    #             hash= get_face_phash(face)
+    #             for oh in faces_hashes:
+    #                 if hashes_are_similar(hash, oh, number_hash_tolerance):
+    #                     break
+    #             else:
+    #                 gallery_unique_faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
+    #             faces_hashes.append(hash)
+    #             gallery_sample_faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))                
+    #     session.commit()
+
+    pass
+
+def detect_and_extract_faces(state_scene_stash, number_deepface_min_confidence, checkbox_dryrun_face_detection, number_hash_tolerance, number_of_samples, progress=gr.Progress(track_tqdm=True)):
+    logger.info(f"detect_and_extract_faces state {state_scene_stash}, detector {config.face_recognition_model} expand {config.expand_face} min_confidence {number_deepface_min_confidence} dryrun {checkbox_dryrun_face_detection} nb samples {number_of_samples}, hash tolerance {number_hash_tolerance}")
     # results= analyse_extracted_video(radio_deepface_detector, number_deepface_extends, checkbox_dryrun_face_detection, progress)
     # logger.debug(f"detect_and_extract_faces {results}")
     gallery_face_dection= []
@@ -203,17 +290,19 @@ def detect_and_extract_faces(state_scene_stash, radio_deepface_detector, number_
             if not img.original_file_exists():
                 logger.warning(f"detect_and_extract_faces File not on disk : {img}")
                 continue
-            analysis: ImageAnalysis= image_analysis(img.original_file(), radio_deepface_detector, number_deepface_extends, session)
+            analysis: ImageAnalysis= image_analysis(img.original_file(), config.face_recognition_model, config.expand_face, session)
             gallery_face_dection.append(img.original_file().get_image_path())
             gallery_face_dection.append(get_annotated_image_analysis_path(analysis, number_deepface_min_confidence))
 
             face: DeepfaceFace
             for face in analysis.faces:
-                if face.overlapping:
+                if face.overlapping or face.status in [FaceStatus.DISCARD, FaceStatus.AUTO_DISCARD]:
                     continue
                 hash= get_face_phash(face)
                 for oh in faces_hashes:
                     if hashes_are_similar(hash, oh, number_hash_tolerance):
+                        face.status= FaceStatus.AUTO_DISCARD
+                        session.add(face)
                         break
                 else:
                     gallery_unique_faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
@@ -279,6 +368,7 @@ def extract_images(number_hash_tolerance, state_scene_stash, progress= gr.Progre
 
 def update_scene_infos(state_scene_stash):
     logger.info(f"update_scene_infos : {state_scene_stash.get('scene_id')}")
+    nb_images= 0
     with get_session() as session:
         scene: Scene= load_scene(state_scene_stash.get('scene_id'), session)
         performers_images= []
@@ -299,6 +389,7 @@ def update_scene_infos(state_scene_stash):
                 </ul>
             </p>
             """
+            nb_images= scene.nb_images
             if scene.nb_images:
                 html += f"""
                 <p>
@@ -337,8 +428,28 @@ def update_scene_infos(state_scene_stash):
                 if performer_img is None:
                     performer_img= get_unknown_performer_image()
                 performers_images.append((performer_img, performer_text))
+            imgFiles: List[ImgFile]= []
+            for img in scene.images:
+                if img.original_file_exists():
+                    imgFiles.append(img.original_file())
+            state_scene_stash['groups']= {}
+            state_scene_stash['ungrouped']= []            
+            analysis: ImageAnalysis
+            analysis_list= load_image_analysis_from_imgFiles(imgFiles, config.face_recognition_model, config.expand_face, session)
+            for analysis in analysis_list:
+                face: DeepFace
+                for face in analysis.faces:
+                    if face.overlapping or face.status in [FaceStatus.DISCARD, FaceStatus.AUTO_DISCARD]:
+                        continue                    
+                    if not face.group:
+                       state_scene_stash['ungrouped'].append(face.id)
+                    elif face.group not in state_scene_stash['groups'].keys():
+                        state_scene_stash['groups'][face.group]= [face.id]
+                    else:
+                        state_scene_stash['groups'][face.group].append(face.id)
+                        
         session.commit()
-    return [html, performers_images, state_scene_stash]
+    return [html, performers_images, state_scene_stash, nb_images]
     # outputs=[html_scene_infos, gallery_performers, state_scene_stash]
     
 def handler_load_scene(scene_id, state_scene_stash):
@@ -355,7 +466,6 @@ def handler_load_scene(scene_id, state_scene_stash):
 
 def stash_scene_tab():
     with gr.Tab("Scenes", id="scene_main_tab") as scene_tab:
-        state_search_scene= gr.BrowserState([])
         state_scene_stash= gr.BrowserState({"scene_id": None})
         with gr.Tabs(elem_id="scenes_tabs") as scenes_tabs:
             with gr.TabItem("Scene", id="scene_stash_tab"):
@@ -381,67 +491,101 @@ def stash_scene_tab():
                                 with gr.Row():
                                     with gr.Column(scale=4):
                                         with gr.Row():
-                                            radio_deepface_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib", "ssd", "opencv"], value="ssd", label='Detector')
-                                            number_deepface_extends= gr.Number(label= "Extends % face detection", value=30)
-                                            number_deepface_min_confidence= gr.Number(value=0.9, maximum=1, step=0.01, label="Minimum confidence")
-                                    with gr.Column():
-                                        btn_detect_faces= gr.Button(value='Detect and extract faces', variant='primary')
-                                        checkbox_dryrun_face_detection= gr.Checkbox(label='Dry run / Samples only', value=True)
-                                with gr.Row():
-                                    number_of_samples= gr.Number(label='Number of samples', precision=0, value=10)
-                                    btn_load_samples= gr.Button(value='Load samples')
-
-                                with gr.Row():
-                                    with gr.Tabs():
-                                        with gr.Tab("Samples face detection"):
-                                            with gr.Row():
-                                                with gr.Column(scale= 1):
-                                                    gallery_extracted= gr.Gallery(label='Samples extracted from scene', object_fit='contain', columns=1)
-                                                with gr.Column(scale= 2):
-                                                    gallery_face_dection= gr.Gallery(label='Face detection on samples', object_fit='contain', columns=2)
-                                        with gr.Tab("Extracted faces"):
-                                            with gr.Row():
-                                                html_analysis_infos= gr.HTML(label='Information')
-                                            with gr.Row():
-                                                with gr.Column():
-                                                    gallery_sample_faces= gr.Gallery(label='Face detection on samples', object_fit='contain')
-                                                with gr.Column():
-                                                    gallery_unique_faces= gr.Gallery(label='Unique faces detected', object_fit='contain')
+                                            number_of_samples= gr.Number(label='Number of samples', precision=0, value=10)                                    
+                                            btn_load_samples= gr.Button(value='Load samples')
+                                        with gr.Row():
+                                            gallery_extracted= gr.Gallery(label='Samples extracted from scene', object_fit='contain')
                             with gr.Tab("Identification"):
                                 with gr.Row():
                                     with gr.Accordion(label="Face selection", open=True):
-                                        radio_deepface_ident_detector= gr.Radio(choices=["retinaface", "mediapipe", "mtcnn", "dlib", "ssd", "opencv"], value="ssd", label='Detector')
-                                        number_deepface_ident_expand= gr.Number(label= "Expand % face detection", value=30)
-                                        number_deepface_ident_face_conf= gr.Number(value=0.9, maximum=1, step=0.01, label="Discard confidence", info="Discard face below this threshold")
-                                        number_ident_hash_tolerance= gr.Number(label='Hash tolerance', info='Higher number for less images', precision=0, value=15)
+                                        with gr.Row():
+                                            number_deepface_ident_face_conf= gr.Number(value=0.9, maximum=1, step=0.01, label="Discard confidence", info="Discard face below this threshold")
+                                            number_ident_hash_tolerance= gr.Number(label='Hash tolerance', info='Higher number for less images', precision=0, value=15)
                                 with gr.Row():
                                     with gr.Accordion(label="Identification parameters"):
-                                        # DeepFace no longer supported
-                                        radio_ident_model= gr.Radio(choices=["VGG-Face", "Facenet", "OpenFace", "DeepID", "Dlib", "ArcFace"], value="VGG-Face", label="Identification model")
                                         number_limit_ident= gr.Number(label='Limit of analysis', precision=0, value=5)                                    
                                 with gr.Row():
-                                    btn_group= gr.Button('Group')
+                                    btn_group= gr.Button('Extract and group', variant='stop')
                                     btn_ident= gr.Button('Run identification')
                                 with gr.Row():
                                     with gr.Accordion(label= 'Raw dataframe', open=False):
                                         df_ident_result= gr.DataFrame(label='Result')
                                 with gr.Row():
                                     html_ident_result= gr.HTML(label='Result')
+                                with gr.Row():
+                                    @gr.render(inputs=[state_scene_stash], triggers=[state_scene_stash.change])
+                                    def render_faces(state):
+                                        logger.info(f"render_faces state: {state}")
+                                        if not isinstance(state, dict):
+                                            return
+                                        ungrouped: List[int]= state.get('ungrouped', [])
+                                        groups: Dict[str, List[int]]= state.get('groups', {})
+                                        with get_session() as session:
+                                            html=f"<p>Ungrouped count: {len(ungrouped)}<p>"
+                                            with gr.Column():
+                                                for group_name, group_items in groups.items():
+                                                    html+=f"<p>{group_name}: {len(group_items)}</p>" 
+                                                with gr.Row():
+                                                    gr.HTML(value=html)
+                                                groups['']= ungrouped
+                                                group_list= list(groups.keys())
+                                                for group_name, face_list in groups.items():
+                                                    with gr.Row():
+                                                        if group_name:
+                                                            txt_current_group_name= gr.Text(visible=False, value=group_name)
+                                                            txt_group_name= gr.Text(label='Group name', value=group_name, info='Use to change the group name or input an existing group name to merge.')
+                                                            txt_group_name.blur(change_group_name, inputs=[txt_current_group_name, txt_group_name, state_scene_stash], outputs=state_scene_stash)
+                                                            txt_group_name.submit(change_group_name, inputs=[txt_current_group_name, txt_group_name, state_scene_stash], outputs=state_scene_stash)
+                                                        else:
+                                                            gr.Label(value='Ungrouped')
+                                                    with gr.Row():
+                                                        for face_id in face_list:
+                                                            face: DeepfaceFace= session.get(DeepfaceFace, face_id)
+                                                            if face is None:
+                                                                continue                                            
+                                                            with gr.Group():
+                                                                with gr.Row():
+                                                                    txt_face_id= gr.Text(visible=False, value=face.id)
+                                                                    img_face= gr.Image(value=get_face_image_path(face), height="200px", label=face.id)
+                                                                with gr.Row():
+                                                                    face_html= gr.HTML(value=f"""
+                                                                            <p>[{face.performer.id if face.performer is not None else ''}]
+                                                                            {face.performer.name if face.performer is not None else ''}</p>
+                                                                            <p>Size {face.w}x{face.h}</p>
+                                                                            <p>Confidence : {round(face.confidence, 3)}</p>
+                                                                            <p>{face.age} yo
+                                                                            {face.race} ({round(face.race_confidence, 3)})
+                                                                            {face.gender} ({round(face.gender_confidence,3)})
+                                                                            </p>
+                                                                            """)
+                                                                with gr.Row():
+                                                                    dd_face_status= gr.Dropdown(choices=[s.value for s in FaceStatus], value=face.status.value, label='Face status')
+                                                                    dd_face_group= gr.Dropdown(choices=group_list, value=face.group, label='Face Group', allow_custom_value=True)
+                                                                    dd_face_status.change(update_face, inputs=[txt_face_id, dd_face_status, dd_face_group, state_scene_stash], outputs=[state_scene_stash])
+                                                                    dd_face_group.change(update_face, inputs=[txt_face_id, dd_face_status, dd_face_group, state_scene_stash], outputs=[state_scene_stash])
+                                                                with gr.Row():
+                                                                    btn_confirm= gr.Button(value='Confirm', variant='primary')
+                                                                    btn_upscale= gr.Button(value='Upscale', variant='huggingface')
+                                                                    btn_discard= gr.Button(value='Discard', variant='stop')
+                                                                    def handle_confirm():
+                                                                        return gr.Dropdown(value=FaceStatus.CONFIRMED.value)
+                                                                    def handle_upscale():
+                                                                        return gr.Dropdown(value=FaceStatus.UPSCALE.value)
+                                                                    def handle_discard():
+                                                                        return gr.Dropdown(value=FaceStatus.DISCARD.value)
+                                                                    btn_confirm.click(handle_confirm, outputs=dd_face_status)
+                                                                    btn_upscale.click(handle_upscale, outputs=dd_face_status)
+                                                                    btn_discard.click(handle_discard, outputs=dd_face_status)                                        
 
         btn_group.click(handler_group_faces,
-                        inputs=[state_scene_stash, radio_deepface_ident_detector, number_deepface_ident_expand, number_deepface_ident_face_conf, number_ident_hash_tolerance, radio_ident_model, number_limit_ident],
-                        outputs=[html_ident_result]
+                        inputs=[state_scene_stash, number_deepface_ident_face_conf, number_ident_hash_tolerance],
+                        outputs=[state_scene_stash]
                         )                                    
 
-        btn_ident.click(ident_faces,
-                        inputs=[state_scene_stash, radio_deepface_ident_detector, number_deepface_ident_expand, number_deepface_ident_face_conf, number_ident_hash_tolerance, radio_ident_model, number_limit_ident],
-                        outputs=[df_ident_result, html_ident_result]
-                        )                                    
-        btn_detect_faces.click(detect_and_extract_faces,
-                               inputs=[state_scene_stash, radio_deepface_detector, number_deepface_extends, number_deepface_min_confidence, checkbox_dryrun_face_detection, number_hash_tolerance, number_of_samples],
-                               outputs=[gallery_face_dection, gallery_sample_faces, gallery_unique_faces, html_analysis_infos]
-                               )
-        
+        # btn_ident.click(ident_faces,
+        #                 inputs=[state_scene_stash, radio_deepface_ident_detector, number_deepface_ident_expand, number_deepface_ident_face_conf, number_ident_hash_tolerance, radio_ident_model, number_limit_ident],
+        #                 outputs=[df_ident_result, html_ident_result]
+        #                 )                                    
         btn_extract_images.click(extract_images, 
                                  inputs=[number_hash_tolerance, state_scene_stash],
                                  outputs=[number_of_images, state_scene_stash]
@@ -459,12 +603,12 @@ def stash_scene_tab():
         btn_load_scene_id.click(handler_load_scene, 
                                 inputs=[txt_scene_id, state_scene_stash], 
                                 outputs=[state_scene_stash]
-                                ).then(update_scene_infos, inputs=state_scene_stash, outputs=[html_scene_infos, gallery_performers, state_scene_stash])
+                                ).then(update_scene_infos, inputs=state_scene_stash, outputs=[html_scene_infos, gallery_performers, state_scene_stash, number_of_images])
         
         txt_scene_id.submit(handler_load_scene, 
                             inputs=[txt_scene_id, state_scene_stash], 
                             outputs=[state_scene_stash]
-                            ).then(update_scene_infos, inputs=state_scene_stash, outputs=[html_scene_infos, gallery_performers, state_scene_stash])
+                            ).then(update_scene_infos, inputs=state_scene_stash, outputs=[html_scene_infos, gallery_performers, state_scene_stash, number_of_images])
         # number_extract_images_per_seconds.change(calculate_nb_images_to_extract, 
         #                                          inputs=[number_frames_per_second, number_duration, number_extract_images_per_seconds], 
         #                                          outputs=[number_images_to_extract]

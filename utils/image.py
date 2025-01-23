@@ -1,5 +1,5 @@
 from utils.custom_logging import get_logger
-logger= get_logger("utils.image")
+logger= get_logger("utils.image", True)
 
 import gradio as gr
 if gr.NO_RELOAD:
@@ -147,6 +147,15 @@ def get_annotated_image_analysis_path(image_analysis: ImageAnalysis, minimum_con
     source_img.save(file)
     return file
 
+def load_image_analysis_from_imgFiles(imgFiles: List[ImgFile], detector, face_expand, session: Session) -> List[ImageAnalysis]:
+    logger.debug(f"load_image_analysis_from_imgFiles Nb of imgFiles : {len(imgFiles)} {detector} {face_expand}")
+    analysis: List[ImageAnalysis]= []
+    statement= select(ImageAnalysis).where(ImageAnalysis.detector==detector).where(ImageAnalysis.expand_face==face_expand).where(ImageAnalysis._image_file_id.in_([imgfile.id for imgfile in imgFiles]))
+    for row in session.execute(statement).fetchall():
+        analysis.append(row[0])
+    logger.debug(f"load_image_analysis_from_imgFiles : return {len(analysis)} analysis")
+    return analysis
+    
 def image_analysis(img_file: ImgFile, detector, face_expand, session: Session, force: bool= False) -> ImageAnalysis:
     logger.info(f"image_analysis detector {detector} face_expand {face_expand} ImgFile {img_file}")
     statement= select(ImageAnalysis).where(ImageAnalysis.image_file == img_file).where(ImageAnalysis.detector==detector).where(ImageAnalysis.expand_face==face_expand)
@@ -313,15 +322,15 @@ def download_image(uri: str, img_type: ImageType, save_base_name: str, current_s
     return (None, None)
     
 def group_faces(group_prefix: str, faces: List[DeepfaceFace], detector_backend, expand_percentage, model_name, session: Session) -> Dict[str, List[DeepfaceFace]]:
-    logger.info(f"group_faces Nb of faces: {len(faces)} Detector : {detector_backend} Expand {expand_percentage}% Model {model_name}")
+    logger.info(f"group_faces Nb of faces: {len(faces)} Detector : {detector_backend} Expand {expand_percentage}%  Model {model_name}")
     groups= {}
     face: DeepfaceFace
     for face in tqdm(faces, desc="Grouping...", unit='face') :
         for name, group_faces in groups.items():
             found= True
-            logger.debug(f"group_faces {get_face_image_path(face)} {get_face_image_path(group_faces[0])}")
             for f in group_faces:
-                result= DeepFace.verify(get_face_image_path(face), get_face_image_path(f), model_name=model_name, detector_backend=detector_backend, expand_percentage=expand_percentage)
+                logger.debug(f"group_faces {get_face_image_path(face)} {get_face_image_path(f)}")
+                result= DeepFace.verify(get_face_image_path(face), get_face_image_path(f), model_name=model_name, detector_backend=detector_backend, enforce_detection=False)
                 #logger.debug(f"result: {result}")
                 if result['verified']:
                     groups.get(name).append(face)
@@ -334,12 +343,15 @@ def group_faces(group_prefix: str, faces: List[DeepfaceFace], detector_backend, 
             if found:
                 break
         else:
-            name= f"{group_prefix} {len(groups) + 1}"
+            if face.group and face.group not in groups.keys():
+                name= face.group
+            else:
+                name= f"{group_prefix} {len(groups) + 1}"
             logger.debug(f"New group {name}")
             groups[name]= [face]
             if face.group != name:
-                session.add(face)
                 face.group= name
+                session.add(face)
     for name, group_faces in groups.items():    
         logger.debug(f"group_faces {name} : {len(group_faces)}")
     return groups

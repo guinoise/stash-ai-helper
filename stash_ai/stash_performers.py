@@ -347,7 +347,7 @@ def stash_performers_tab():
                                             face_border_color= "#1FA207"                                                                                                                  
                                         with gr.Group():
                                             with gr.Row():
-                                                img_face= gr.Image(value=get_face_image_path(face), height="150")
+                                                img_face= gr.Image(value=get_face_image_path(face), height="150px")
                                             with gr.Row():
                                                 face_html= gr.HTML(value=f"""
                                                         <p>[{face.performer.id if face.performer is not None else ''}]

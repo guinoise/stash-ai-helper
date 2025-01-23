@@ -211,7 +211,7 @@ class ImgFile(BaseModel):
         return self.relative_path and self.get_image_path().exists()
 
     def __repr__(self):
-        return f"{self.__class__.__module__}.{self.__class__.__name__} (phash : {self.phash} scale: {self.scale} size: {self.width}x{self.height}, format: {self.format} mode: {self.mode}, content-type: {self.content_type}, relative_path: {self.relative_path})"
+        return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} phash: {self.phash} scale: {self.scale} size: {self.width}x{self.height} format: {self.format} mode: {self.mode} content-type: {self.content_type} relative_path: {self.relative_path})"
 
 class ImgUri(BaseModel):
     __tablename__ = "image_uri"
