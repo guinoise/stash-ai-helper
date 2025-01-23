@@ -61,7 +61,8 @@ def update_face(face_id: int, face_status: str, face_group: str, state_scene_sta
 def handler_group_faces(state_scene_stash, number_deepface_ident_face_conf, number_ident_hash_tolerance, progress=gr.Progress(track_tqdm=True)):
     logger.info(f"handler_group_faces detector {config.face_identification_model} expand {config.expand_face} min_confidence face {number_deepface_ident_face_conf} hash tolerance {number_ident_hash_tolerance} model {config.face_identification_model}")
     logger.debug(f"handler_group_faces {state_scene_stash}")
-    html= ""    
+    html= ""  
+    state_scene_stash['discarded']=[]
     with get_session() as session:
         scene: Scene= load_scene(state_scene_stash.get('scene_id'), session)
         if scene is None:
@@ -82,7 +83,10 @@ def handler_group_faces(state_scene_stash, number_deepface_ident_face_conf, numb
                     face.status= FaceStatus.AUTO_DISCARD
                     session.add(face)
                     continue
-                if face.status in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
+                if face.status == FaceStatus.DISCARD:
+                    state_scene_stash['discarded'].append(face.id)
+                    continue    
+                if face.status == FaceStatus.AUTO_DISCARD:
                     continue
                 hash= get_face_phash(face)
                 if face.confidence < number_deepface_ident_face_conf:
@@ -109,7 +113,7 @@ def handler_group_faces(state_scene_stash, number_deepface_ident_face_conf, numb
                     state_scene_stash['groups'][groupe_name].append(face.id)
         face: DeepfaceFace
         session.commit()
-    return state_scene_stash
+    return [state_scene_stash, "Extract and group"]
     
 def ident_faces(state_scene_stash, radio_deepface_ident_detector, number_deepface_ident_expand, number_deepface_ident_face_conf, number_ident_hash_tolerance, radio_ident_model, number_limit_ident, progress=gr.Progress(track_tqdm=True)):
     logger.info(f"ident_faces detector {radio_deepface_ident_detector} expand {number_deepface_ident_expand} min_confidence face {number_deepface_ident_face_conf} hash tolerance {number_ident_hash_tolerance} model {radio_ident_model}")
@@ -434,13 +438,17 @@ def update_scene_infos(state_scene_stash):
                     imgFiles.append(img.original_file())
             state_scene_stash['groups']= {}
             state_scene_stash['ungrouped']= []            
+            state_scene_stash['discarded']= []
             analysis: ImageAnalysis
             analysis_list= load_image_analysis_from_imgFiles(imgFiles, config.face_recognition_model, config.expand_face, session)
             for analysis in analysis_list:
                 face: DeepFace
                 for face in analysis.faces:
-                    if face.overlapping or face.status in [FaceStatus.DISCARD, FaceStatus.AUTO_DISCARD]:
-                        continue                    
+                    if face.overlapping or face.status == FaceStatus.AUTO_DISCARD:
+                        continue
+                    if face.status == FaceStatus.DISCARD:
+                        state_scene_stash['discarded'].append(face.id)
+                        continue
                     if not face.group:
                        state_scene_stash['ungrouped'].append(face.id)
                     elif face.group not in state_scene_stash['groups'].keys():
@@ -495,7 +503,7 @@ def stash_scene_tab():
                                             btn_load_samples= gr.Button(value='Load samples')
                                         with gr.Row():
                                             gallery_extracted= gr.Gallery(label='Samples extracted from scene', object_fit='contain')
-                            with gr.Tab("Identification"):
+                            with gr.Tab("Identification"):                                   
                                 with gr.Row():
                                     with gr.Accordion(label="Face selection", open=True):
                                         with gr.Row():
@@ -508,10 +516,7 @@ def stash_scene_tab():
                                     btn_group= gr.Button('Extract and group', variant='stop')
                                     btn_ident= gr.Button('Run identification')
                                 with gr.Row():
-                                    with gr.Accordion(label= 'Raw dataframe', open=False):
-                                        df_ident_result= gr.DataFrame(label='Result')
-                                with gr.Row():
-                                    html_ident_result= gr.HTML(label='Result')
+                                    html_ident_result= gr.HTML(label='Result', value='Progress')
                                 with gr.Row():
                                     @gr.render(inputs=[state_scene_stash], triggers=[state_scene_stash.change])
                                     def render_faces(state):
@@ -576,10 +581,52 @@ def stash_scene_tab():
                                                                     btn_confirm.click(handle_confirm, outputs=dd_face_status)
                                                                     btn_upscale.click(handle_upscale, outputs=dd_face_status)
                                                                     btn_discard.click(handle_discard, outputs=dd_face_status)                                        
+                                                with gr.Row():
+                                                    gr.Label(value='Discarded')
+                                                with gr.Row():
+                                                    for face_id in state.get('discarded', []):
+                                                        face: DeepfaceFace= session.get(DeepfaceFace, face_id)
+                                                        if face is None:
+                                                            continue                                            
+                                                        with gr.Group():
+                                                            with gr.Row():
+                                                                txt_face_id= gr.Text(visible=False, value=face.id)
+                                                                img_face= gr.Image(value=get_face_image_path(face), height="200px", label=face.id)
+                                                            with gr.Row():
+                                                                face_html= gr.HTML(value=f"""
+                                                                        <p>[{face.performer.id if face.performer is not None else ''}]
+                                                                        {face.performer.name if face.performer is not None else ''}</p>
+                                                                        <p>Size {face.w}x{face.h}</p>
+                                                                        <p>Confidence : {round(face.confidence, 3)}</p>
+                                                                        <p>{face.age} yo
+                                                                        {face.race} ({round(face.race_confidence, 3)})
+                                                                        {face.gender} ({round(face.gender_confidence,3)})
+                                                                        </p>
+                                                                        """)
+                                                            with gr.Row():
+                                                                dd_face_status= gr.Dropdown(choices=[s.value for s in FaceStatus], value=face.status.value, label='Face status')
+                                                                dd_face_group= gr.Dropdown(choices=group_list, value=face.group, label='Face Group', allow_custom_value=True)
+                                                                dd_face_status.change(update_face, inputs=[txt_face_id, dd_face_status, dd_face_group, state_scene_stash], outputs=[state_scene_stash])
+                                                                dd_face_group.change(update_face, inputs=[txt_face_id, dd_face_status, dd_face_group, state_scene_stash], outputs=[state_scene_stash])
+                                                            with gr.Row():
+                                                                btn_confirm= gr.Button(value='Confirm', variant='primary')
+                                                                btn_upscale= gr.Button(value='Upscale', variant='huggingface')
+                                                                btn_discard= gr.Button(value='Discard', variant='stop')
+                                                                def handle_confirm():
+                                                                    return gr.Dropdown(value=FaceStatus.CONFIRMED.value)
+                                                                def handle_upscale():
+                                                                    return gr.Dropdown(value=FaceStatus.UPSCALE.value)
+                                                                def handle_discard():
+                                                                    return gr.Dropdown(value=FaceStatus.DISCARD.value)
+                                                                btn_confirm.click(handle_confirm, outputs=dd_face_status)
+                                                                btn_upscale.click(handle_upscale, outputs=dd_face_status)
+                                                                btn_discard.click(handle_discard, outputs=dd_face_status)                                        
+                                                    
+
 
         btn_group.click(handler_group_faces,
                         inputs=[state_scene_stash, number_deepface_ident_face_conf, number_ident_hash_tolerance],
-                        outputs=[state_scene_stash]
+                        outputs=[state_scene_stash, html_ident_result]
                         )                                    
 
         # btn_ident.click(ident_faces,
