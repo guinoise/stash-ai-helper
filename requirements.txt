@@ -24,3 +24,4 @@ scipy
 safetensors
 git+https://github.com/sberbank-ai/Real-ESRGAN.git
 huggingface_hub==0.25
+psycopg2
