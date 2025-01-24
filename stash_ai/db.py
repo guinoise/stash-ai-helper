@@ -91,6 +91,7 @@ def list_backups():
     return backup_files
 
 def backup_database(backup_file: str) ->bool:
+    database_file= config.base_dir.joinpath('stash-ai.sqlite3')    
     if not config.aes_password:
         raise gr.Error("AES password not in configuration. Unable to save an encrypted backup.")
     backup_file= config.encrypted_data.joinpath(f"{backup_file}.aes")
@@ -110,6 +111,7 @@ def backup_database(backup_file: str) ->bool:
     return success
 
 def restore_database_backup(backup_filename: str) -> str|None:
+    database_file= config.base_dir.joinpath('stash-ai.sqlite3')    
     logger.warning("Restore of backup requested")
     backup_file= config.encrypted_data.joinpath(backup_filename)
     database_file_bk= database_file.parent.joinpath(f"{database_file.name}.bk")
