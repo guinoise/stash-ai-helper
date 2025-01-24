@@ -27,6 +27,8 @@ class Config:
     face_recognition_model: str= ''
     expand_face: float= 0
     face_identification_model: str= ''
+    database_backend: str= 'sqlite3'
+    database_endpoint: str= 'stash-ai.sqlite3'
    
 config_file= pathlib.Path('config.json')
 config= Config()
@@ -105,6 +107,8 @@ def load_config():
     config.face_recognition_model= conf.get('face_recognition_model', 'ssd')   
     config.face_identification_model= conf.get('face_identification_model', 'VGG-Face')   
     config.expand_face= conf.get('expand_face', 30)   
+    config.database_backend= conf.get('database_backend', 'sqlite3')   
+    config.database_endpoint= conf.get('database_endpoint', 'stash-ai.sqlite3')    
     connect_to_stash()
     
 def save_config():
@@ -117,7 +121,9 @@ def save_config():
         'aes_password': config.aes_password,
         'face_recognition_model': config.face_recognition_model,
         'face_identification_model': config.face_identification_model,
-        'expand_face': config.expand_face
+        'expand_face': config.expand_face,
+        'database_backend': config.database_backend,
+        'database_endpoint': config.database_endpoint
     }
     try:
         with open(config_file, 'w') as file:
@@ -127,7 +133,16 @@ def save_config():
     logger.debug("Saved config: %r", conf)    
     connect_to_stash()
 
-def save_config_btn_handler(stash_schema, stash_hostname, stash_port, stash_api_key, aes_password, face_identification_model, face_recognition_model, face_expand):
+def save_config_btn_handler(stash_schema, 
+                            stash_hostname, 
+                            stash_port, 
+                            stash_api_key, 
+                            aes_password, 
+                            face_identification_model, 
+                            face_recognition_model, 
+                            face_expand,
+                            db_backend,
+                            db_endpoint):
     logger.info("Save config handler")
     config.stash_schema= stash_schema
     config.stash_hostname= stash_hostname
@@ -137,11 +152,31 @@ def save_config_btn_handler(stash_schema, stash_hostname, stash_port, stash_api_
     config.face_identification_model= face_identification_model
     config.face_recognition_model= face_recognition_model
     config.expand_face= face_expand
+    config.database_backend= db_backend
+    config.database_endpoint= db_endpoint
     save_config()
-    return [config.stash_schema, config.stash_hostname, config.stash_port, stash_api_key, config.aes_password, config.face_identification_model, config.face_recognition_model, config.expand_face]
+    return [config.stash_schema, 
+            config.stash_hostname,
+            config.stash_port,
+            config.stash_api_key, 
+            config.aes_password,
+            config.face_identification_model,
+            config.face_recognition_model,
+            config.expand_face,
+            config.database_backend,
+            config.database_endpoint]
 
 def get_config_handler():
-    return [config.stash_schema, config.stash_hostname, config.stash_port, config.stash_api_key, config.aes_password, config.face_identification_model, config.face_recognition_model, config.expand_face]
+    return [config.stash_schema, 
+            config.stash_hostname, 
+            config.stash_port, 
+            config.stash_api_key, 
+            config.aes_password, 
+            config.face_identification_model, 
+            config.face_recognition_model, 
+            config.expand_face,
+            config.database_backend,
+            config.database_endpoint]
 
 def config_tab():
     with gr.Tab("Config") as tab_config:
@@ -173,6 +208,9 @@ def config_tab():
             )
             chk_show= gr.Checkbox(value=False, label="Show password") 
         with gr.Group():
+            dd_db_backend= gr.Dropdown(choices=["sqlite3", "postgresql"], value=config.database_backend)
+            txt_db_endpoint= gr.Text(label='Database endpoint', info="For sqlite3, name of the file. For postgresql USER:PASSWORD@host/DB", value=config.database_endpoint)
+        with gr.Group():
             dd_face_recognition_model= gr.Dropdown(choices=["retinaface", "mediapipe", "mtcnn", "dlib", "ssd", "opencv"])
             number_face_expand= gr.Number(label= "Expand % face detection")
             dd_face_identification_model= gr.Dropdown(choices=["VGG-Face", "Facenet", "OpenFace", "DeepID", "Dlib", "ArcFace"])
@@ -196,8 +234,39 @@ def config_tab():
         else:
             type='password'
         return gr.Textbox(type=type)
-    tab_config.select(get_config_handler, None, outputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key, txt_aes_password, dd_face_identification_model, dd_face_recognition_model, number_face_expand])
-    btn_save_config.click(save_config_btn_handler, inputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key, txt_aes_password, dd_face_identification_model, dd_face_recognition_model, number_face_expand], outputs=[dd_stash_schema, txt_stash_hostname, nb_stash_port, txt_stash_api_key, txt_aes_password, dd_face_identification_model, dd_face_recognition_model, number_face_expand])
+    tab_config.select(get_config_handler, 
+                      None, 
+                      outputs=[dd_stash_schema, 
+                               txt_stash_hostname, 
+                               nb_stash_port,
+                               txt_stash_api_key,
+                               txt_aes_password,
+                               dd_face_identification_model,
+                               dd_face_recognition_model,
+                               number_face_expand,
+                               dd_db_backend,
+                               txt_db_endpoint])
+    btn_save_config.click(save_config_btn_handler, 
+                          inputs=[dd_stash_schema, 
+                                  txt_stash_hostname,
+                                  nb_stash_port,
+                                  txt_stash_api_key,
+                                  txt_aes_password,
+                                  dd_face_identification_model,
+                                  dd_face_recognition_model,
+                                  number_face_expand,
+                                  dd_db_backend,
+                                  txt_db_endpoint],
+                          outputs=[dd_stash_schema, 
+                                   txt_stash_hostname,
+                                   nb_stash_port,
+                                   txt_stash_api_key,
+                                   txt_aes_password,
+                                   dd_face_identification_model,
+                                   dd_face_recognition_model,
+                                   number_face_expand,
+                                   dd_db_backend,
+                                   txt_db_endpoint])
     btn_reload_stash_config.click(connect_to_stash)
     btn_backup.click(backup_button_handler, txt_filename, dd_db_backups)
     chk_show.change(set_password_visibility, [chk_show], [txt_aes_password])

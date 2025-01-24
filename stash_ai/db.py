@@ -21,16 +21,21 @@ lock_db= False
 
 def init_engine():
     global engine
-    database_file= config.base_dir.joinpath('stash-ai.sqlite3')
-    # if not gr.NO_RELOAD and engine is not None:
-    #     logger.warning("Closing database on reload")
-    #     close_db()
     if lock_db:
         raise ValueError('Database is locked, cannot open it')
-    new_datababase= not database_file.is_file()
+    
     if engine is None:
-        logger.info(f"Init database: {database_file.resolve()} new: {new_datababase}")
-        url= f"sqlite+pysqlite:///{database_file.resolve()}"
+        logger.info(f"Init database: {config.database_backend} : {config.database_endpoint}")
+        if config.database_backend == 'sqlite3':
+            database_file= config.base_dir.joinpath(config.database_endpoint)
+            new_datababase= not database_file.is_file()
+            url= f"sqlite+pysqlite:///{database_file.resolve()}"
+        elif config.database_backend == 'postgresql':
+            url= f"postgresql+psycopg2://{config.database_endpoint}"
+            new_datababase= False
+        else:
+            raise ValueError(f"Database backend not configured : {config.database_backend}")
+        logger.info(f"Init database: {url}")
         engine= create_engine(url=url)
         from stash_ai.model import BaseModel
         from alembic.config import Config
@@ -39,7 +44,7 @@ def init_engine():
         logger.warning(f"** Engine **")
         with engine.begin() as connection:
             try:
-                alembic_cfg_file= database_file.parent.joinpath('alembic.ini')
+                alembic_cfg_file= config.base_dir.joinpath('alembic.ini')
                 logger.info(f"Alembic config file {alembic_cfg_file.resolve()}")
                 #alembic_cfg= Config(alembic_cfg_file, attributes={'disable_existing_loggers': True})   
                 alembic_cfg= Config(alembic_cfg_file)   
@@ -87,22 +92,27 @@ def close_db():
     
 def list_backups():
     backup_files= []
-    for f in config.encrypted_data.glob('*.sqlite3.aes'):
-        backup_name= '.'.join(f.name.split('.')[:-2])
-        #backup_files.append((backup_name, f"{backup_name} ({datetime.fromtimestamp(f.stat().st_birthtime).isoformat()})"))
-        backup_files.append((backup_name, f"{backup_name} ({datetime.fromtimestamp(f.stat().st_ctime).isoformat()})"))
+    if config.database_backend == 'sqlite3':
+        for f in config.encrypted_data.glob('*.sqlite3.aes'):
+            backup_name= '.'.join(f.name.split('.')[:-2])
+            #backup_files.append((backup_name, f"{backup_name} ({datetime.fromtimestamp(f.stat().st_birthtime).isoformat()})"))
+            backup_files.append((backup_name, f"{backup_name} ({datetime.fromtimestamp(f.stat().st_ctime).isoformat()})"))
     logger.info("Backup files: %s", backup_files)
     return backup_files
 
 def backup_database(backup_name: str) ->bool:
-    database_file= config.base_dir.joinpath('stash-ai.sqlite3')    
-    if not config.aes_password:
-        raise gr.Error("AES password not in configuration. Unable to save an encrypted backup.")
-    backup_file= config.encrypted_data.joinpath(f"{backup_name}.sqlite3.aes")
-    backup_tarfile= config.encrypted_data.joinpath(f"{backup_name}.tar.gz.aes")
-    if backup_file.exists():
-        gr.Warning("Backup file already exists")
-        return False
+    if config.database_backend == 'sqlite3':
+        database_file= config.base_dir.joinpath(config.database_endpoint)    
+        if not config.aes_password:
+            raise gr.Error("AES password not in configuration. Unable to save an encrypted backup.")
+        backup_file= config.encrypted_data.joinpath(f"{backup_name}.sqlite3.aes")
+        backup_tarfile= config.encrypted_data.joinpath(f"{backup_name}.tar.gz.aes")
+        if backup_file.exists():
+            gr.Warning("Backup file already exists")
+            return False
+    else:
+        logger.error(f"Unsuported backend {config.database_backend}")
+        return
     if engine is not None:
         close_db()
     success= False
@@ -131,7 +141,18 @@ def backup_database(backup_name: str) ->bool:
     return success
 
 def restore_database_backup(backup_name: str) -> str|None:
-    database_file= config.base_dir.joinpath('stash-ai.sqlite3')    
+    if config.database_backend == 'sqlite3':
+        database_file= config.base_dir.joinpath(config.database_endpoint)    
+        if not config.aes_password:
+            raise gr.Error("AES password not in configuration. Unable to save an encrypted backup.")
+        backup_file= config.encrypted_data.joinpath(f"{backup_name}.sqlite3.aes")
+        backup_tarfile= config.encrypted_data.joinpath(f"{backup_name}.tar.gz.aes")
+        if backup_file.exists():
+            gr.Warning("Backup file already exists")
+            return False
+    else:
+        logger.error(f"Unsuported backend {config.database_backend}")
+        return    
     logger.warning("Restore of backup requested")
     backup_file= config.encrypted_data.joinpath(f"{backup_name}.sqlite3.aes")
     backup_tarfile= config.encrypted_data.joinpath(f"{backup_name}.tar.gz.aes")

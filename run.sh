@@ -8,6 +8,7 @@ done
 DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
 
 cd ${DIR}
+docker-compose up -d
 export GRADIO_ALLOWED_PATHS=${DIR}/local_assets
 source venv/bin/activate
 python gui.py --listen 0.0.0.0
