@@ -3,15 +3,17 @@ logger= get_logger("stash_ai.db")
 import gradio as gr
 from typing import Union
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, Engine
+from sqlalchemy import create_engine, Engine, select
 from stash_ai.config import config
 import pathlib
 import shutil
 from time import sleep
-import logging
 import pyAesCrypt
 from datetime import datetime
-
+import tempfile
+import tarfile
+from stash_ai.model import ImgFile
+import os
 #logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
 engine: Engine= None
@@ -86,15 +88,17 @@ def close_db():
 def list_backups():
     backup_files= []
     for f in config.encrypted_data.glob('*.sqlite3.aes'):
-        backup_files.append((f.name, f"{f.name} ({datetime.fromtimestamp(f.stat().st_birthtime).isoformat()})"))
+        backup_name= '.'.join(f.name.split('.')[:-2])
+        backup_files.append((backup_name, f"{backup_name} ({datetime.fromtimestamp(f.stat().st_birthtime).isoformat()})"))
     logger.info("Backup files: %s", backup_files)
     return backup_files
 
-def backup_database(backup_file: str) ->bool:
+def backup_database(backup_name: str) ->bool:
     database_file= config.base_dir.joinpath('stash-ai.sqlite3')    
     if not config.aes_password:
         raise gr.Error("AES password not in configuration. Unable to save an encrypted backup.")
-    backup_file= config.encrypted_data.joinpath(f"{backup_file}.aes")
+    backup_file= config.encrypted_data.joinpath(f"{backup_name}.sqlite3.aes")
+    backup_tarfile= config.encrypted_data.joinpath(f"{backup_name}.tar.gz.aes")
     if backup_file.exists():
         gr.Warning("Backup file already exists")
         return False
@@ -105,15 +109,32 @@ def backup_database(backup_file: str) ->bool:
         if not config.encrypted_data.exists():
             config.encrypted_data.mkdir(parents=True)
         pyAesCrypt.encryptFile(database_file, backup_file, config.aes_password) 
+        _, tmpfile= tempfile.mkstemp(suffix='.tar.gz')
+        tar= tarfile.open(name=tmpfile, mode='w:gz')
+        with get_session() as session:
+            for row in session.execute(select(ImgFile)).fetchall():
+                imgFile: ImgFile= row[0]
+                p= imgFile.get_image_path()
+                if p.exists():
+                    tar.add(name=str(p.resolve()), arcname=str(p.relative_to(config.data_dir)))
+        for p in config.data_dir.joinpath('dataset').glob('*'):
+            if p.is_file():
+                tar.add(name=str(p.resolve()), arcname=str(p.relative_to(config.data_dir)))    
+        tar.close()
+        pyAesCrypt.encryptFile(tmpfile, backup_tarfile, config.aes_password)
+        os.unlink(tmpfile)
+        logger.warning(f"Backup completed {backup_file.name} {backup_tarfile.name}")
         success= True
     except Exception as e:
         logger.error("Error encrypting a copy of the database: %s", e)
     return success
 
-def restore_database_backup(backup_filename: str) -> str|None:
+def restore_database_backup(backup_name: str) -> str|None:
     database_file= config.base_dir.joinpath('stash-ai.sqlite3')    
     logger.warning("Restore of backup requested")
-    backup_file= config.encrypted_data.joinpath(backup_filename)
+    backup_file= config.encrypted_data.joinpath(f"{backup_name}.sqlite3.aes")
+    backup_tarfile= config.encrypted_data.joinpath(f"{backup_name}.tar.gz.aes")
+    
     database_file_bk= database_file.parent.joinpath(f"{database_file.name}.bk")
     if not backup_file.is_file():
         logger.error(f"Backup file {backup_file.resolve()} NOT FOUND")
@@ -127,6 +148,16 @@ def restore_database_backup(backup_filename: str) -> str|None:
         shutil.move(str(database_file.resolve()), str(database_file_bk.resolve()))
         logger.warning("Decrypting backup file")
         pyAesCrypt.decryptFile(backup_file, database_file, config.aes_password)
+        if backup_tarfile.exists():
+            if not config.data_dir.exists():
+                config.data_dir.mkdir(parents=True)
+            _, tmpfile= tempfile.mkstemp(suffix='.tar.gz')
+            pyAesCrypt.decryptFile(backup_tarfile, tmpfile, config.aes_password)
+            tar= tarfile.open(tmpfile, mode='r:gz')
+            tar.extractall(path=str(config.data_dir.resolve()))
+            tar.close()
+            os.unlink(tmpfile)
+            
     except Exception as e:
         error_message= f"Error restoring a copy of the database: {e!s}"
         logger.error(error_message)
