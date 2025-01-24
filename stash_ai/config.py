@@ -47,7 +47,7 @@ def backup_button_handler(backup_name: str):
         raise gr.Error(f'Backup name {backup_name} must not contain . (dot) character')       
     # if not backup_name.endswith('.sqlite3'):
     #     raise gr.Error(f'Backup name {backup_name} must end with .sqlite3')
-    if backup_database(backup_file=f"{backup_name}.sqlite3"):
+    if backup_database(backup_name=backup_name):
         gr.Info('Backup completed')
     else:
         gr.Warning('Backup failed')
@@ -60,7 +60,7 @@ def restore_backup_button_handler(backup_index: int):
         raise gr.Error('Select a backup file')
     backup_name= list_backups()[backup_index-1][0]
     gr.Warning(f"Restoring {backup_name}")
-    err_message= restore_database_backup(backup_filename=backup_name)
+    err_message= restore_database_backup(backup_name=backup_name)
     if  err_message is None:
         gr.Warning('Restore complete')
     else:
