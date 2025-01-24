@@ -158,7 +158,7 @@ def restore_database_backup(backup_name: str) -> str|None:
             tar.extractall(path=str(config.data_dir.resolve()))
             tar.close()
             os.unlink(tmpfile)
-            
+        logger.warning("Restore complete")
     except Exception as e:
         error_message= f"Error restoring a copy of the database: {e!s}"
         logger.error(error_message)
