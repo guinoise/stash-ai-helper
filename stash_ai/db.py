@@ -11,7 +11,6 @@ from time import sleep
 import logging
 import pyAesCrypt
 from datetime import datetime
-database_file= config.base_dir.joinpath('stash-ai.sqlite3')
 
 #logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
@@ -20,6 +19,7 @@ lock_db= False
 
 def init_engine():
     global engine
+    database_file= config.base_dir.joinpath('stash-ai.sqlite3')
     # if not gr.NO_RELOAD and engine is not None:
     #     logger.warning("Closing database on reload")
     #     close_db()
@@ -37,8 +37,8 @@ def init_engine():
         logger.warning(f"** Engine **")
         with engine.begin() as connection:
             try:
-                alembic_cfg_file= pathlib.Path('alembic.ini')
-                logger.debug(f"Alembic config file {alembic_cfg_file.resolve()}")
+                alembic_cfg_file= database_file.parent.joinpath('alembic.ini')
+                logger.info(f"Alembic config file {alembic_cfg_file.resolve()}")
                 #alembic_cfg= Config(alembic_cfg_file, attributes={'disable_existing_loggers': True})   
                 alembic_cfg= Config(alembic_cfg_file)   
                 alembic_cfg.set_main_option('sqlalchemy.url', url)
