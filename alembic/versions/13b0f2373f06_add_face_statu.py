@@ -21,9 +21,11 @@ depends_on: Union[str, Sequence[str], None] = None
 def _get_facestatus():
     return postgresql.ENUM('DISCOVERED', 
                            'CONFIRMED', 
+                           'UPSCALE',
                            'DISCARD', 
                            'AUTO_DISCARD', 
-                           'AUTO_CONFIRMED', 
+                           'AUTO_CONFIRMED',
+                           'AUTO_UPSCALE',
                            name='facestatus')
 
 def upgrade() -> None:
