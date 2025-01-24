@@ -17,6 +17,25 @@ import re
 
 FULL_SEARCH_ALLOWED=False
 
+#preprocess_all_performer_images, inputs=[txt_current_performer_id, state_peformer_stash], outputs=[state_peformer_stash]
+def preprocess_all_performer_images(performer_id, state_performer_stash, progress= gr.Progress()):
+    with get_session() as session:
+        performer: Performer
+        for perf_row in progress.tqdm(session.execute(select(Performer)).fetchall(), desc='Preprocessing...', unit='performer'):
+            performer= perf_row[0]                                   
+            for img in progress.tqdm(performer.images, desc='Analyzing...', unit='img'):
+                if img.image_type in [ImageType.STASH_BOX_PERFORMER, ImageType.PERFORMER_MAIN] or img.phash == performer.main_image_phash:
+                    if not img.original_file_exists():
+                        logger.warning(f"Image not on disk {img.phash}")
+                        continue
+                    img_file= img.original_file()
+                    analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=config.expand_face, session=session)
+                    for face in analysis.faces:
+                        if face.performer is None:
+                            face.performer= performer
+                            session.add(face)    
+    return "<h1>Images preprocessed...</h1>"
+
 def handle_create_dataset(minimum_confidence, progress= gr.Progress()):
     html=""
     dataset_dir= config.data_dir.joinpath('dataset/performers')
@@ -105,7 +124,7 @@ def display_performer(state_performer_stash, performer: str):
     if isinstance(performer, int):
         performer_id= performer
     else:
-        id_search: re.Match= re.match('^\[([0-9]+)\].*', performer)
+        id_search: re.Match= re.match(r'^\[([0-9]+)\].*', performer)
         if id_search:
             performer_id= int(id_search.group(1))
         elif performer.isdigit():
@@ -288,6 +307,7 @@ def stash_performers_tab():
                     btn_sync_performers= gr.Button(value='Sync all performers from stash')
                     btn_update_downloaded= gr.Button(value='Update all downloaded performers')
                     btn_download_all_stashbox_images= gr.Button(icon='assets/download.png', value='Download all images from stashbox for all performers')
+                    btn_preprocess_all_stashbox_images= gr.Button(value='Preprocess all images from stashbox/stash for all performers')
                     html_result_batch= gr.HTML("<h1>Batch progress</h1>") 
                 with gr.Row():
                     with gr.Column(scale=1):
@@ -363,8 +383,12 @@ def stash_performers_tab():
                                                 dd_face_status= gr.Dropdown(choices=[s.value for s in FaceStatus], value=face.status.value, label='Face status')
                                                 dd_face_status.change(update_face_status, inputs=[txt_face_id, dd_face_status], outputs=[img_face])
                                             with gr.Row():
-                                                btn_confirm= gr.Button(value='Confirm', variant='primary')
-                                                btn_upscale= gr.Button(value='Upscale', variant='huggingface')
+                                                if face.w < 200:
+                                                    btn_upscale= gr.Button(value='Upscale', variant='huggingface')
+                                                    btn_confirm= gr.Button(value='Confirm', variant='primary')
+                                                else:
+                                                    btn_confirm= gr.Button(value='Confirm', variant='primary')
+                                                    btn_upscale= gr.Button(value='Upscale', variant='huggingface')
                                                 btn_discard= gr.Button(value='Discard', variant='stop')
                                                 def handle_confirm():
                                                     return gr.Dropdown(value=FaceStatus.CONFIRMED.value)
@@ -379,10 +403,10 @@ def stash_performers_tab():
                                                 # btn_upscale.click(handle_upscale_face, inputs=[txt_face_id], outputs=[img_face, face_html])
                                     if len(faces) >= 100:
                                         with gr.Row():
-                                            gr.Label(value="More performers to validate")                                    
+                                            gr.HTML(value="<h2>More performers to validate</h2><a href='#top'>Go to top</a>")                                   
                                     else:
                                         with gr.Row():
-                                            gr.Label(value="Complete")
+                                            gr.HTML(value="<h2>Complete</h2><a href='#top'>Go to top</a>")                                   
                             session.commit()
 
                                        
@@ -413,6 +437,10 @@ def stash_performers_tab():
         btn_download_images_from_stash_box.click(download_images_from_stash_box, 
                                                 inputs=[txt_current_performer_id, state_peformer_stash], 
                                                 outputs=[state_peformer_stash]
+                                                )
+        btn_preprocess_all_stashbox_images.click(preprocess_all_performer_images,
+                                                inputs=[txt_current_performer_id, state_peformer_stash], 
+                                                outputs=[html_result_batch]
                                                 )
         btn_sync_performers.click(sync_all_performers, inputs=None, outputs=html_result_batch)
         btn_update_downloaded.click(update_all_performers, inputs=None, outputs=html_result_batch)
