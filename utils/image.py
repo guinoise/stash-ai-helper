@@ -1,5 +1,5 @@
 from utils.custom_logging import get_logger
-logger= get_logger("utils.image", True)
+logger= get_logger("utils.image")
 
 import gradio as gr
 if gr.NO_RELOAD:
@@ -42,7 +42,7 @@ def upscale_pil_x2(im: Image.Image) -> Image.Image:
 
 def upscale_img_x2(img_phash: str, session: Session):
     global _real_esrgan_model
-    logger.info(f"Upscaling {img_phash}")
+    logger.debug(f"Upscaling {img_phash}")
     current_session= session if session is not None else get_session()
     img: Img= current_session.get(Img, img_phash)
     if img is None or not img.original_file_exists():
@@ -76,7 +76,7 @@ def upscale_img_x2(img_phash: str, session: Session):
     if session is None:
         current_session.commit()
     session.commit()
-    logger.info(f"Upscale done {img_phash} {upscaled_image.size}")
+    logger.debug(f"Upscale done {img_phash} {upscaled_image.size}")
     return new_file
 
 def get_face_phash(face: DeepfaceFace):
@@ -157,7 +157,7 @@ def load_image_analysis_from_imgFiles(imgFiles: List[ImgFile], detector, face_ex
     return analysis
     
 def image_analysis(img_file: ImgFile, detector, face_expand, session: Session, force: bool= False) -> ImageAnalysis:
-    logger.info(f"image_analysis detector {detector} face_expand {face_expand} ImgFile {img_file}")
+    logger.debug(f"image_analysis detector {detector} face_expand {face_expand} ImgFile {img_file}")
     statement= select(ImageAnalysis).where(ImageAnalysis.image_file == img_file).where(ImageAnalysis.detector==detector).where(ImageAnalysis.expand_face==face_expand)
     row= session.execute(statement).fetchone()
 
@@ -166,7 +166,7 @@ def image_analysis(img_file: ImgFile, detector, face_expand, session: Session, f
         if force:
             session.delete(analysis)
         else:
-            logger.info(f"image_analysis : Analysis already done, returning db results")
+            logger.debug(f"image_analysis : Analysis already done, returning db results")
             return analysis
 
     if not img_file.exists():
@@ -203,11 +203,11 @@ def image_analysis(img_file: ImgFile, detector, face_expand, session: Session, f
                     face.overlapping= True
                 logger.debug(f"Overlapping face check {i}: {face.overlapping} {other_face.overlapping}")
     except ValueError:
-        logger.info(f"image_analysis Image {analysis} has no face(s)")
+        logger.debug(f"image_analysis Image {analysis} has no face(s)")
     for face in analysis.faces:
         logger.debug(f"image_analysis {face}")
     session.commit()
-    logger.info(f"image_analysis {analysis}")
+    logger.debug(f"image_analysis {analysis}")
     for face in analysis.faces:
         logger.debug(f"image_analysis {face}")
     return analysis
@@ -322,7 +322,7 @@ def download_image(uri: str, img_type: ImageType, save_base_name: str, current_s
     return (None, None)
     
 def group_faces(group_prefix: str, faces: List[DeepfaceFace], detector_backend, expand_percentage, model_name, session: Session) -> Dict[str, List[DeepfaceFace]]:
-    logger.info(f"group_faces Nb of faces: {len(faces)} Detector : {detector_backend} Expand {expand_percentage}%  Model {model_name}")
+    logger.debug(f"group_faces Nb of faces: {len(faces)} Detector : {detector_backend} Expand {expand_percentage}%  Model {model_name}")
     groups= {}
     face: DeepfaceFace
     for face in tqdm(faces, desc="Grouping...", unit='face') :

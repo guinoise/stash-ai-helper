@@ -1,12 +1,12 @@
 from utils.custom_logging import get_logger
-logger= get_logger("stash_ai.stash_scenes", True)
+logger= get_logger("stash_ai.stash_scenes")
 
 import gradio as gr
 if gr.NO_RELOAD:
     from deepface import DeepFace
 from stash_ai.config import config
 from stash_ai.db import get_session
-from stash_ai.model import Performer, Scene, Img, ImgFile, ImageAnalysis, DeepfaceFace, FaceStatus
+from stash_ai.model import Performer, Scene, Img, ImgFile, ImageAnalysis, DeepfaceFace, FaceStatus, GroupIdentificationPerformer, GroupIdentification
 from utils.performer import get_performer_stash_image, load_performer, get_unknown_performer_image
 from utils.scene import load_scene, create_or_update_scene_from_stash, extract_scene_images, decord_scene
 from utils.image import image_analysis, get_annotated_image_analysis_path, get_face_image_path, get_face_phash, hashes_are_similar, group_faces, load_image_analysis_from_imgFiles
@@ -18,6 +18,15 @@ from typing import List, Dict
 import pandas as pd
 import pathlib
 
+#load_manual_perf, inputs=[txt_manual_perf_id], outputs=[img_manual_perf, html_manual_perf]
+def load_manual_perf(txt_manual_perf_id):
+    with get_session() as session:
+        performer= session.get(Performer, txt_manual_perf_id)
+        if performer is None:
+            return [None, 'Not found']
+        im= get_performer_stash_image(performer, session= session)
+        return [im, f"<p>Id {performer.id}</p><p>{performer.name}</p>"]
+    
 #assign_confirm, inputs=[state_scene_stash, txt_group_name, txt_perf_id], outputs=[state_scene_stash]
 def assign_confirm(state_scene_stash, group_name, performer_id):
     logger.info(f"Assign confirm performer {performer_id} to group {group_name}")
@@ -25,7 +34,7 @@ def assign_confirm(state_scene_stash, group_name, performer_id):
         performer= session.get(Performer, performer_id)
         if performer is None:
             return state_scene_stash
-        logger.debug(f"Performer {performer}")
+        logger.info(f"Performer {performer}")
         for face_id in state_scene_stash['groups'].get(group_name):
             face: DeepfaceFace= session.get(DeepfaceFace, face_id)
             face.performer= performer
@@ -144,6 +153,7 @@ def ident_faces(state_scene_stash, number_deepface_ident_face_conf, number_ident
         return None, None, None
     with get_session() as session:
         state_scene_stash['groups_results']= {}
+        scene= session.get(Scene, state_scene_stash.get('scene_id'))
         for group_name, faces_list in progress.tqdm(state_scene_stash.get('groups', {}).items(), desc='Groups', unit='group'):
             logger.info(f"Group {group_name}")
             frames_results= []
@@ -166,11 +176,25 @@ def ident_faces(state_scene_stash, number_deepface_ident_face_conf, number_ident
             df['PerformerId'] = perf_ids
             df['PerformerName'] = perf_names
             df['score']= ((df.groupby('PerformerId')['PerformerId'].transform('size')/len(df))+1) * df.groupby('PerformerId')['threshold'].transform('max')
-            s= df.groupby('PerformerId').agg("max").sort_values('score', ascending=False).head(3)
+            s= df.groupby('PerformerId').agg("max").sort_values('score', ascending=False).head(20)
             s.reset_index()
             state_scene_stash['groups_results'][group_name]= []
+            group_ident: GroupIdentification
+            gi: GroupIdentification
+            for gi in scene.group_identifications:
+                if gi.group == group_name:
+                    group_ident= gi
+                    gi.performer_scores.clear()
+                    break
+            else:
+                group_ident= GroupIdentification(group= group_name, scene=scene)
             for performer_id, row in s.iterrows():
-                state_scene_stash['groups_results'][group_name].append({'performer_id': performer_id, 'performer_name': row['PerformerName'], 'score': round(row['score'],3)})                
+                performer: Performer= session.get(Performer, performer_id)
+                group_ident.performer_scores.append(GroupIdentificationPerformer(score=round(row['score'],5), performer=performer))
+                state_scene_stash['groups_results'][group_name].append({'performer_id': performer_id, 'score': round(row['score'],5)})
+                
+            session.add(group_ident)
+        session.commit()
     return state_scene_stash, "Identification of group completed"
 
 def render_detect_extract_faces(state_scene_stash, min_confidence, dryrun, hash_tolerance, number_of_samples, progress=gr.Progress(track_tqdm=True)):
@@ -404,7 +428,13 @@ def update_scene_infos(state_scene_stash):
                         state_scene_stash['groups'][face.group]= [face.id]
                     else:
                         state_scene_stash['groups'][face.group].append(face.id)
-                        
+            group_ident: GroupIdentification
+            state_scene_stash['groups_results']= {}
+            for group_ident in scene.group_identifications:
+                state_scene_stash['groups_results'][group_ident.group]= []
+                group_ident_score: GroupIdentificationPerformer
+                for group_ident_score in group_ident.performer_scores:
+                    state_scene_stash['groups_results'][group_ident.group].append({'performer_id': group_ident_score.performer.id, 'score': group_ident_score.score})
         session.commit()
     return [html, performers_images, state_scene_stash, nb_images]
     # outputs=[html_scene_infos, gallery_performers, state_scene_stash]
@@ -535,13 +565,20 @@ def stash_scene_tab():
                                                                     with gr.Column():
                                                                         with gr.Row():
                                                                             with gr.Column(scale=2):
-                                                                                gr.Image(performer.main_image.get_highres_imgfile().get_image_path())
+                                                                                gr.Image(performer.main_image.get_highres_imgfile().get_image_path(), height="125px")
                                                                             with gr.Column(scale=2):
                                                                                 txt_perf_id= gr.Text(visible=False, value=performer.id)
                                                                                 gr.HTML(value=f"<p>Id: {performer.id}</p><p>{performer.name}</p><p>Score : {result.get('score')}</p>")
                                                                             with gr.Column():
                                                                                 btn_assign_confirm= gr.Button(value='Assign and confirm', variant='primary')
                                                                                 btn_assign_confirm.click(assign_confirm, inputs=[state_scene_stash, txt_group_name, txt_perf_id], outputs=[state_scene_stash])
+                                                            with gr.Column():
+                                                                img_manual_perf= gr.Image(height="125px")
+                                                                html_manual_perf= gr.HTML(value="")
+                                                                txt_manual_perf_id= gr.Text(label="Performer id")
+                                                                txt_manual_perf_id.submit(load_manual_perf, inputs=[txt_manual_perf_id], outputs=[img_manual_perf, html_manual_perf])
+                                                                btn_assign_manual_confirm= gr.Button(value='Assign and confirm', variant='primary')
+                                                                btn_assign_manual_confirm.click(assign_confirm, inputs=[state_scene_stash, txt_group_name, txt_manual_perf_id], outputs=[state_scene_stash])
                                                                                 
                                                                     
                                                 with gr.Row():

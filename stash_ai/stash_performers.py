@@ -40,7 +40,7 @@ def handle_create_dataset(minimum_confidence, progress= gr.Progress()):
                         logger.warning(f"Image not on disk {img.phash}")
                         continue
                     img_file= img.original_file()
-                    analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=200, session=session)
+                    analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=config.expand_face, session=session)
                     for face in analysis.faces:
                         if face.performer is None:
                             face.performer= performer
@@ -255,7 +255,7 @@ def stash_performers_tab():
                                             logger.warning(f"Image not on disk {img.phash}")
                                             continue
                                         img_file= img.original_file()
-                                        analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=200, session=session)
+                                        analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=config.expand_face, session=session)
                                         with gr.Row():
                                             with gr.Column():
                                                 with gr.Group():

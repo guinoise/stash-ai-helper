@@ -151,6 +151,7 @@ class Scene(BaseModel):
     nb_faces: Mapped[Optional[int]]    
     performers: Mapped[List[Performer]]= relationship(secondary=performers_scene)
     images: Mapped[List["Img"]]= relationship(secondary="scenes_images")
+    group_identifications: Mapped[List["GroupIdentification"]]= relationship()
     
     def number_of_frames(self) -> int:
         if self.fps is None or self.duration is None:
@@ -183,6 +184,24 @@ class Scene(BaseModel):
 
     def __repr__(self):
         return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} Updated: {self.stash_updated_at} Title: {self.title} Url: {self.url} Codec: {self.video_codec} Size: {self.width}x{self.height} Downscale : {self.downscale} ({self.downscale_width}x{self.downscale_height}) Nb Images: {self.nb_images} Faces: {self.nb_faces} Performers: {self.performers})"
+
+class GroupIdentificationPerformer(BaseModel):
+    __tablename__ = "group_identification_performer"
+    id: Mapped[int]= mapped_column(primary_key=True, autoincrement=True)
+    _group_identification_id: Mapped[int]= mapped_column(ForeignKey("group_identification.id"))
+    group_identification: Mapped["GroupIdentification"]= relationship(back_populates="performer_scores")
+    _performer_id: Mapped[int]= mapped_column(ForeignKey("performer.id"))
+    performer: Mapped[Performer]= relationship()
+    score: Mapped[float]
+    
+
+class GroupIdentification(BaseModel):
+    __tablename__= "group_identification"
+    id: Mapped[int]= mapped_column(primary_key=True, autoincrement=True)
+    group: Mapped[str]
+    _scene_id: Mapped[int]= mapped_column(ForeignKey("scene.id"))
+    scene: Mapped[Scene]= relationship(back_populates="group_identifications")
+    performer_scores: Mapped[List[GroupIdentificationPerformer]]= relationship(cascade='all, delete-orphan')
 
 class ImgFile(BaseModel):
     __tablename__= "image_file"
