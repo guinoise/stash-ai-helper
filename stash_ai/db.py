@@ -89,7 +89,8 @@ def list_backups():
     backup_files= []
     for f in config.encrypted_data.glob('*.sqlite3.aes'):
         backup_name= '.'.join(f.name.split('.')[:-2])
-        backup_files.append((backup_name, f"{backup_name} ({datetime.fromtimestamp(f.stat().st_birthtime).isoformat()})"))
+        #backup_files.append((backup_name, f"{backup_name} ({datetime.fromtimestamp(f.stat().st_birthtime).isoformat()})"))
+        backup_files.append((backup_name, f"{backup_name} ({datetime.fromtimestamp(f.stat().st_ctime).isoformat()})"))
     logger.info("Backup files: %s", backup_files)
     return backup_files
 
