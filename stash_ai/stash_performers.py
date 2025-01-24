@@ -314,7 +314,7 @@ def stash_performers_tab():
                                                 logger.warning(f"Image not on disk {img.phash}")
                                                 continue
                                             img_file= img.original_file()
-                                            analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=200, session=session)
+                                            analysis= image_analysis(img_file=img_file, detector=config.face_recognition_model, face_expand=config.expand_face, session=session)
                                             for face in analysis.faces:
                                                 if face.performer is None:
                                                     face.performer= performer
@@ -347,7 +347,7 @@ def stash_performers_tab():
                                             face_border_color= "#1FA207"                                                                                                                  
                                         with gr.Group():
                                             with gr.Row():
-                                                img_face= gr.Image(value=get_face_image_path(face), height="150px")
+                                                img_face= gr.Image(value=get_face_image_path(face), height="200px", label=face.id)
                                             with gr.Row():
                                                 face_html= gr.HTML(value=f"""
                                                         <p>[{face.performer.id if face.performer is not None else ''}]
