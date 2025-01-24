@@ -150,7 +150,7 @@ class Scene(BaseModel):
     extends_face_detection: Mapped[Optional[float]]
     nb_faces: Mapped[Optional[int]]    
     performers: Mapped[List[Performer]]= relationship(secondary=performers_scene)
-    images: Mapped[List["Img"]]= relationship(secondary="scenes_images", cascade='all, delete-orphan')
+    images: Mapped[List["Img"]]= relationship(secondary="scenes_images")
     group_identifications: Mapped[List["GroupIdentification"]]= relationship()
     
     def number_of_frames(self) -> int:
