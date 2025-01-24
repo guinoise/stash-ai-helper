@@ -80,6 +80,8 @@ def get_unknown_performer_image():
 
 def load_performer(performer_id: int, session: Session) -> Performer:
     logger.info(f"Load performer {performer_id}")
+    if not performer_id:
+        return None
     performer= session.get(Performer, performer_id)
     logger.debug(f"load_performer: Performer : {performer}")
     if performer is None:

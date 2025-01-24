@@ -17,6 +17,22 @@ import re
 
 FULL_SEARCH_ALLOWED=False
 
+#auto_validate, inputs=[state_peformer_stash], outputs=[state_peformer_stash]
+def auto_validate(state: Dict):
+    logger.info(f"auto_valide {state}")
+    face_ids= state.pop('auto_valide', [])
+    with get_session() as session:
+        for face_id in face_ids:
+            face: DeepfaceFace= session.get(DeepfaceFace, face_id)
+            logger.info(f"{face.id} {face.status} {face.w}")
+            if face.status == FaceStatus.DISCOVERED:
+                if face.w < 200:
+                    face.status= FaceStatus.UPSCALE
+                else:
+                    face.status= FaceStatus.CONFIRMED
+                session.add(face)
+        session.commit()
+    return state
 #preprocess_all_performer_images, inputs=[txt_current_performer_id, state_peformer_stash], outputs=[state_peformer_stash]
 def preprocess_all_performer_images(performer_id, state_performer_stash, progress= gr.Progress()):
     with get_session() as session:
@@ -217,6 +233,7 @@ def stash_performers_tab():
     with gr.Tab("Performers", id="performer_main_tab") as performers_tab:
         state_search_performer= gr.BrowserState([])
         state_peformer_stash= gr.BrowserState({"image_ids": [], "current_index": None})
+        state_performer_batch= gr.State({})
         with gr.Tabs(elem_id="performers_tabs") as performers_tabs:                        
             with gr.Tab("Search", id="performer_search_tab"):
                 with gr.Row():
@@ -320,9 +337,10 @@ def stash_performers_tab():
                     btn_create_dataset.click(handle_create_dataset, inputs=[number_batch_deepface_min_confidence], outputs=[html_dataset])
                 with gr.Row():
                     with gr.Column():
-                        @gr.render(inputs= [number_batch_deepface_min_confidence], triggers=[btn_validate.click])
-                        def validate_faces(min_confidence):
-                            logger.info("Render all performers")                          
+                        @gr.render(inputs= [number_batch_deepface_min_confidence, state_performer_batch], triggers=[btn_validate.click, state_performer_batch.change])
+                        def validate_faces(min_confidence, state):
+                            logger.info("Render all performers")  
+                            state['auto_valide'] = []  
                             with get_session() as session:
                                 faces: List[DeepfaceFace]= []
                                 performer: Performer
@@ -347,6 +365,7 @@ def stash_performers_tab():
                                                     if face.confidence < min_confidence and face.status not in [FaceStatus.AUTO_DISCARD, FaceStatus.DISCARD]:
                                                         face.status= FaceStatus.AUTO_DISCARD
                                                         session.add(face)
+                                                    state['auto_valide'].append(face.id)
                                                     faces.append(face)
                                     if len(faces) >= 100:
                                         break
@@ -406,9 +425,11 @@ def stash_performers_tab():
                                             gr.HTML(value="<h2>More performers to validate</h2><a href='#top'>Go to top</a>")                                   
                                     else:
                                         with gr.Row():
-                                            gr.HTML(value="<h2>Complete</h2><a href='#top'>Go to top</a>")                                   
+                                            gr.HTML(value="<h2>Complete</h2><a href='#top'>Go to top</a>") 
+                                    btn_auto_validate_discovered= gr.Button(value='Apply default to faces in state discovered')
+                                    state_current= gr.State(state)
+                                    btn_auto_validate_discovered.click(auto_validate, inputs=[state_performer_batch], outputs=[state_performer_batch])                    
                             session.commit()
-
                                        
         btn_refresh_performer_id.click(handler_btn_refresh_performer_id, inputs=[dd_performer_id], outputs=[dd_performer_id])                
         btn_search_performer_name.click(search_performer_by_name, 
