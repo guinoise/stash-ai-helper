@@ -8,8 +8,8 @@ import math
 import cv2
 import shutil
 from typing import List, Optional, Dict
-from stash_ai.model import Scene, Performer, Img, ImgFile, ImageType
-from utils.image import ImageAnalysis, image_analysis, hashes_are_similar
+from stash_ai.model import Scene, Performer, Img, ImgFile, ImageType, DeepfaceFace, FaceStatus
+from utils.image import ImageAnalysis, image_analysis, hashes_are_similar, get_face_phash, get_face_image_path
 from sqlalchemy.orm import Session
 from dateutil import parser
 from datetime import datetime
@@ -201,7 +201,7 @@ def decord_scene(scene: Scene,hash_tolerance: int= 20, downscale: int= 512, sess
     return True
     
 
-def extract_scene_images(scene: Scene,hash_tolerance: int= 20, session: Session= None) -> bool:
+def extract_scene_images(scene: Scene,hash_tolerance: int= 20, face_hash_tolerance: int= 15, session: Session= None) -> bool:
     image_hashes= []
     nb_frames= scene.number_of_frames()
     logger.info(f"extract_images Scene: {scene.id} FPS: {scene.fps} Hash tolerance {hash_tolerance} Total frames: {nb_frames}")
@@ -244,6 +244,7 @@ def extract_scene_images(scene: Scene,hash_tolerance: int= 20, session: Session=
             gr.Warning("Unable to locate the video, could not extract.")
         else:
             logger.debug(f"extract_images Open VideoCapture {location}")
+            faces_hashes= []
             cap= cv2.VideoCapture(location)
             frame= 0
             success= True
@@ -297,6 +298,31 @@ def extract_scene_images(scene: Scene,hash_tolerance: int= 20, session: Session=
                             session.add(imgFile)
                             scene.images.append(img)
                             pImg.save(image_path)
+                            analysis: ImageAnalysis= image_analysis(img.original_file(), config.face_recognition_model, config.expand_face, session)
+                            face: DeepfaceFace
+                            faces_to_remove= []
+                            for face in analysis.faces:
+                                if face.overlapping or face.status == FaceStatus.DISCARD:
+                                    faces_to_remove.append(face)
+                                    continue
+                                hash= get_face_phash(face)
+                                for oh in faces_hashes:
+                                    if hashes_are_similar(hash, oh, face_hash_tolerance):
+                                        face.status= FaceStatus.AUTO_DISCARD
+                                        faces_to_remove.append(face)
+                                        break
+                                else:
+                                    if face.status == FaceStatus.AUTO_DISCARD:
+                                        face.status= FaceStatus.DISCOVERED
+                                    session.add(face)
+                                faces_hashes.append(hash)
+                            for face in faces_to_remove:
+                                get_face_image_path(face).unlink()
+                                analysis.faces.remove(face)
+                            if len(analysis.faces) == 0:
+                                image_path.unlink()
+                                session.delete(analysis)
+                                session.delete(img)
                         scene.nb_images+= 1
                         session.add(scene)
                         image_hashes.append(phash)

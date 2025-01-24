@@ -18,7 +18,6 @@ from typing import List, Dict
 import pandas as pd
 import pathlib
 
-#load_manual_perf, inputs=[txt_manual_perf_id], outputs=[img_manual_perf, html_manual_perf]
 def load_manual_perf(txt_manual_perf_id):
     with get_session() as session:
         performer= session.get(Performer, txt_manual_perf_id)
@@ -27,7 +26,6 @@ def load_manual_perf(txt_manual_perf_id):
         im= get_performer_stash_image(performer, session= session)
         return [im, f"<p>Id {performer.id}</p><p>{performer.name}</p>"]
     
-#assign_confirm, inputs=[state_scene_stash, txt_group_name, txt_perf_id], outputs=[state_scene_stash]
 def assign_confirm(state_scene_stash, group_name, performer_id):
     logger.info(f"Assign confirm performer {performer_id} to group {group_name}")
     with get_session() as session:
@@ -83,7 +81,6 @@ def update_face(face_id: int, face_status: str, face_group: str, state_scene_sta
         session.commit()
     return state_scene_stash
 
-#inputs=[state_scene_stash, number_deepface_ident_face_conf, number_ident_hash_tolerance, number_limit_ident],
 def handler_group_faces(state_scene_stash, number_deepface_ident_face_conf, number_ident_hash_tolerance, progress=gr.Progress(track_tqdm=True)):
     logger.info(f"handler_group_faces detector {config.face_identification_model} expand {config.expand_face} min_confidence face {number_deepface_ident_face_conf} hash tolerance {number_ident_hash_tolerance} model {config.face_identification_model}")
     logger.debug(f"handler_group_faces {state_scene_stash}")
@@ -112,8 +109,6 @@ def handler_group_faces(state_scene_stash, number_deepface_ident_face_conf, numb
                 if face.status == FaceStatus.DISCARD:
                     state_scene_stash['discarded'].append(face.id)
                     continue    
-                if face.status == FaceStatus.AUTO_DISCARD:
-                    continue
                 hash= get_face_phash(face)
                 if face.confidence < number_deepface_ident_face_conf:
                     face.status= FaceStatus.AUTO_DISCARD
@@ -125,6 +120,9 @@ def handler_group_faces(state_scene_stash, number_deepface_ident_face_conf, numb
                         session.add(face)
                         break
                 else:
+                    if face.status == FaceStatus.AUTO_DISCARD:
+                        face.status= FaceStatus.DISCOVERED
+                        session.add(face)
                     faces.append(face)
                 faces_hashes.append(hash)
         
@@ -140,9 +138,6 @@ def handler_group_faces(state_scene_stash, number_deepface_ident_face_conf, numb
         face: DeepfaceFace
         session.commit()
     return [state_scene_stash, "Extract and group"]
-
-                        # inputs=[state_scene_stash, number_deepface_ident_face_conf, number_ident_hash_tolerance],
-                        # outputs=[state_scene_stash, html_ident_result]
     
 def ident_faces(state_scene_stash, number_deepface_ident_face_conf, number_ident_hash_tolerance, progress=gr.Progress(track_tqdm=True)):
     logger.info(f"ident_faces detector {config.face_recognition_model} min_confidence face {number_deepface_ident_face_conf} hash tolerance {number_ident_hash_tolerance} model {config.face_identification_model}")
@@ -176,7 +171,8 @@ def ident_faces(state_scene_stash, number_deepface_ident_face_conf, number_ident
             df['PerformerId'] = perf_ids
             df['PerformerName'] = perf_names
             df['score']= ((df.groupby('PerformerId')['PerformerId'].transform('size')/len(df))+1) * df.groupby('PerformerId')['threshold'].transform('max')
-            s= df.groupby('PerformerId').agg("max").sort_values('score', ascending=False).head(20)
+            #s= df.groupby('PerformerId').agg("max").sort_values('score', ascending=False).head(20)
+            s= df[df['score'] > 0.65].groupby('PerformerId').agg("max").sort_values('score', ascending=False).head(20)
             s.reset_index()
             state_scene_stash['groups_results'][group_name]= []
             group_ident: GroupIdentification
@@ -197,52 +193,8 @@ def ident_faces(state_scene_stash, number_deepface_ident_face_conf, number_ident
         session.commit()
     return state_scene_stash, "Identification of group completed"
 
-def render_detect_extract_faces(state_scene_stash, min_confidence, dryrun, hash_tolerance, number_of_samples, progress=gr.Progress(track_tqdm=True)):
-    logger.info(f"render_detect_extract_faces state {state_scene_stash}, detector {config.face_recognition_model} expand {config.expand_face} min_confidence {min_confidence} dryrun {dryrun} nb samples {number_of_samples}, hash tolerance {hash_tolerance}")
-
-    # if state_scene_stash.get('scene_id') is None:
-    #     gr.Warning("Current scene id not found. Reload the scene.")
-    #     return
-    # with get_session() as session:
-    #     scene: Scene= load_scene(state_scene_stash.get('scene_id'), session)
-    #     if scene is None:
-    #         raise gr.Error(f"Scene {state_scene_stash.get('scene_id')} not found in DB!")
-    #     imgs: List[Img]= []
-    #     if dryrun:
-    #         imgs= random.choices(scene.images, k=min(len(scene.images), number_of_samples))
-    #     else:
-    #         imgs= scene.images
-
-    #     img: Img            
-    #     for img in tqdm(imgs, desc='Processing...', unit='image'):
-    #         logger.debug(f"detect_and_extract_faces Detection on {img}")
-    #         if not img.original_file_exists():
-    #             logger.warning(f"detect_and_extract_faces File not on disk : {img}")
-    #             continue
-    #         analysis: ImageAnalysis= image_analysis(img.original_file(), config.face_recognition_model, config.expand_face, session)
-    #         gallery_face_dection.append(img.original_file().get_image_path())
-    #         gallery_face_dection.append(get_annotated_image_analysis_path(analysis, number_deepface_min_confidence))
-
-    #         face: DeepfaceFace
-    #         for face in analysis.faces:
-    #             if face.overlapping:
-    #                 continue
-    #             hash= get_face_phash(face)
-    #             for oh in faces_hashes:
-    #                 if hashes_are_similar(hash, oh, number_hash_tolerance):
-    #                     break
-    #             else:
-    #                 gallery_unique_faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
-    #             faces_hashes.append(hash)
-    #             gallery_sample_faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))                
-    #     session.commit()
-
-    pass
-
 def detect_and_extract_faces(state_scene_stash, number_deepface_min_confidence, checkbox_dryrun_face_detection, number_hash_tolerance, number_of_samples, progress=gr.Progress(track_tqdm=True)):
     logger.info(f"detect_and_extract_faces state {state_scene_stash}, detector {config.face_recognition_model} expand {config.expand_face} min_confidence {number_deepface_min_confidence} dryrun {checkbox_dryrun_face_detection} nb samples {number_of_samples}, hash tolerance {number_hash_tolerance}")
-    # results= analyse_extracted_video(radio_deepface_detector, number_deepface_extends, checkbox_dryrun_face_detection, progress)
-    # logger.debug(f"detect_and_extract_faces {results}")
     gallery_face_dection= []
     gallery_sample_faces= []
     gallery_unique_faces= []
@@ -273,7 +225,7 @@ def detect_and_extract_faces(state_scene_stash, number_deepface_min_confidence, 
 
             face: DeepfaceFace
             for face in analysis.faces:
-                if face.overlapping or face.status in [FaceStatus.DISCARD, FaceStatus.AUTO_DISCARD]:
+                if face.overlapping or face.status == FaceStatus.DISCARD:
                     continue
                 hash= get_face_phash(face)
                 for oh in faces_hashes:
@@ -282,6 +234,9 @@ def detect_and_extract_faces(state_scene_stash, number_deepface_min_confidence, 
                         session.add(face)
                         break
                 else:
+                    if face.status == FaceStatus.AUTO_DISCARD:
+                        face.status= FaceStatus.DISCOVERED
+                        session.add(face)
                     gallery_unique_faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))
                 faces_hashes.append(hash)
                 gallery_sample_faces.append((get_face_image_path(face), f"[{face.confidence}] {face.race} ({int(face.race_confidence)}) {face.gender} ({int(face.gender_confidence)}) {face.age} yo"))                
@@ -291,16 +246,7 @@ def detect_and_extract_faces(state_scene_stash, number_deepface_min_confidence, 
             <p>Faces extracted : {len(gallery_sample_faces)}</p>
             <p>Unique faces : {len(gallery_unique_faces)}</p>
         """
-    # metadata: ImageAnalysis
-    # for metadata in results:
-    #     if not metadata.sample:
-    #         continue
-    #     gallery_face_dection.append(metadata.get_numpy())
-    #     gallery_face_dection.append(metadata.get_numpy_with_overlay(number_deepface_min_confidence))
-    #     #gallery_sample_faces.extend(metadata.get_faces_numpy(number_deepface_min_confidence))
-    # logger.info(f"analyse_extracted_video : Gallery faces : {len(gallery_face_dection)} Sample faces: {len(gallery_sample_faces)}")
     return [gallery_face_dection, gallery_sample_faces, gallery_unique_faces, infos_html]
-    #outputs=[gallery_face_dection, gallery_sample_faces, gallery_unique_faces]
 
 def handle_load_samples(number_of_samples, state_scene_stash):
     logger.info(f"extract_images Samples {number_of_samples} state {state_scene_stash}")
@@ -319,9 +265,7 @@ def handle_load_samples(number_of_samples, state_scene_stash):
                     imgs.append(img.original_file().get_image_path())
     return [imgs, state_scene_stash]   
 
-     
-#inputs=[number_of_samples, state_scene_stash],
-def extract_images(number_hash_tolerance, state_scene_stash, progress= gr.Progress(track_tqdm=True)):
+def extract_images(number_hash_tolerance, number_ident_hash_tolerance, state_scene_stash, progress= gr.Progress(track_tqdm=True)):
     logger.info(f"extract_images Hash tolerance {number_hash_tolerance} state {state_scene_stash}")
     nb_images= 0
     if state_scene_stash.get('scene_id') is None:
@@ -331,16 +275,11 @@ def extract_images(number_hash_tolerance, state_scene_stash, progress= gr.Progre
         scene: Scene= load_scene(state_scene_stash.get('scene_id'), session)
         if scene is None:
             raise gr.Error(f"Scene {state_scene_stash.get('scene_id')} not found in DB!")
-        extract_scene_images(scene, hash_tolerance=number_hash_tolerance, session=session)
+        extract_scene_images(scene, hash_tolerance=number_hash_tolerance, face_hash_tolerance=number_ident_hash_tolerance, session=session)
         nb_images= scene.nb_images
         #decord_scene(scene, hash_tolerance=number_hash_tolerance, downscale=number_downscale, session=session)
-        session.commit()
-           
-    # nb_images= math.ceil(number_duration * number_extract_images_per_seconds)
-    # logger.info(f"extract_images URL: {text_video_url} Img per second : {number_extract_images_per_seconds} FPS: {number_frames_per_second} Total images: {nb_images} Samples: {number_of_samples}")
-    # return extract_video_images(text_video_url, number_duration, number_frames_per_second, number_extract_images_per_seconds, number_of_samples, progress)
+        session.commit()           
     return [nb_images, state_scene_stash]
-    #outputs=[gallery_extracted, number_of_images, state_scene_stash]
 
 
 def update_scene_infos(state_scene_stash):
@@ -437,7 +376,6 @@ def update_scene_infos(state_scene_stash):
                     state_scene_stash['groups_results'][group_ident.group].append({'performer_id': group_ident_score.performer.id, 'score': group_ident_score.score})
         session.commit()
     return [html, performers_images, state_scene_stash, nb_images]
-    # outputs=[html_scene_infos, gallery_performers, state_scene_stash]
     
 def handler_load_scene(scene_id, state_scene_stash):
     logger.info(f"handler_load_scene : {scene_id}")
@@ -447,9 +385,6 @@ def handler_load_scene(scene_id, state_scene_stash):
         session.commit()
     logger.debug(f"handler_load_scene out state : {state_scene_stash}")
     return state_scene_stash
-
-    # outputs=[html_scene_infos, gallery_performers, state_scene_stash]
-
 
 def stash_scene_tab():
     with gr.Tab("Scenes", id="scene_main_tab") as scene_tab:
@@ -502,6 +437,7 @@ def stash_scene_tab():
                                         ungrouped: List[int]= state.get('ungrouped', [])
                                         groups: Dict[str, List[int]]= state.get('groups', {})
                                         with get_session() as session:
+                                            scene= session.get(Scene, state.get('scene_id'))
                                             html=f"<p>Ungrouped count: {len(ungrouped)}<p>"
                                             with gr.Column():
                                                 for group_name, group_items in groups.items():
@@ -562,23 +498,30 @@ def stash_scene_tab():
                                                             for result in state.get('groups_results', {}).get(group_name):
                                                                 performer= session.get(Performer, result['performer_id'])
                                                                 if performer is not None:
-                                                                    with gr.Column():
-                                                                        with gr.Row():
+                                                                    with gr.Row():
+                                                                        with gr.Group():
                                                                             with gr.Column(scale=2):
                                                                                 gr.Image(performer.main_image.get_highres_imgfile().get_image_path(), height="125px")
                                                                             with gr.Column(scale=2):
+                                                                                if performer in scene.performers:
+                                                                                    p_style=" style='color: #30F30D;'"
+                                                                                else:
+                                                                                    p_style=" style='color: #F3360D;'"
                                                                                 txt_perf_id= gr.Text(visible=False, value=performer.id)
-                                                                                gr.HTML(value=f"<p>Id: {performer.id}</p><p>{performer.name}</p><p>Score : {result.get('score')}</p>")
+                                                                                gr.HTML(value=f"<p{p_style}>Id: {performer.id}</p><p>{performer.name}</p><p>Score : {result.get('score')}</p>")
                                                                             with gr.Column():
                                                                                 btn_assign_confirm= gr.Button(value='Assign and confirm', variant='primary')
                                                                                 btn_assign_confirm.click(assign_confirm, inputs=[state_scene_stash, txt_group_name, txt_perf_id], outputs=[state_scene_stash])
-                                                            with gr.Column():
-                                                                img_manual_perf= gr.Image(height="125px")
-                                                                html_manual_perf= gr.HTML(value="")
-                                                                txt_manual_perf_id= gr.Text(label="Performer id")
-                                                                txt_manual_perf_id.submit(load_manual_perf, inputs=[txt_manual_perf_id], outputs=[img_manual_perf, html_manual_perf])
-                                                                btn_assign_manual_confirm= gr.Button(value='Assign and confirm', variant='primary')
-                                                                btn_assign_manual_confirm.click(assign_confirm, inputs=[state_scene_stash, txt_group_name, txt_manual_perf_id], outputs=[state_scene_stash])
+                                                            with gr.Group():
+                                                                with gr.Column():
+                                                                    img_manual_perf= gr.Image(height="125px")
+                                                                with gr.Column():
+                                                                    html_manual_perf= gr.HTML(value="")
+                                                                    txt_manual_perf_id= gr.Text(label="Performer id")
+                                                                    txt_manual_perf_id.submit(load_manual_perf, inputs=[txt_manual_perf_id], outputs=[img_manual_perf, html_manual_perf])
+                                                                with gr.Column():
+                                                                    btn_assign_manual_confirm= gr.Button(value='Assign and confirm', variant='primary')
+                                                                    btn_assign_manual_confirm.click(assign_confirm, inputs=[state_scene_stash, txt_group_name, txt_manual_perf_id], outputs=[state_scene_stash])
                                                                                 
                                                                     
                                                 with gr.Row():
@@ -634,7 +577,7 @@ def stash_scene_tab():
                         outputs=[state_scene_stash, html_ident_result]
                         )                                    
         btn_extract_images.click(extract_images, 
-                                 inputs=[number_hash_tolerance, state_scene_stash],
+                                 inputs=[number_hash_tolerance, number_ident_hash_tolerance, state_scene_stash],
                                  outputs=[number_of_images, state_scene_stash]
                                  ).then(update_scene_infos, 
                                         inputs=state_scene_stash, 
@@ -656,11 +599,4 @@ def stash_scene_tab():
                             inputs=[txt_scene_id, state_scene_stash], 
                             outputs=[state_scene_stash]
                             ).then(update_scene_infos, inputs=state_scene_stash, outputs=[html_scene_infos, gallery_performers, state_scene_stash, number_of_images])
-        # number_extract_images_per_seconds.change(calculate_nb_images_to_extract, 
-        #                                          inputs=[number_frames_per_second, number_duration, number_extract_images_per_seconds], 
-        #                                          outputs=[number_images_to_extract]
-        #                                          )
-        # number_total_frames.change(calculate_nb_images_to_extract, 
-        #                            inputs=[number_frames_per_second, number_duration, number_extract_images_per_seconds], 
-        #                            outputs=[number_images_to_extract]
-        #                            )
+
