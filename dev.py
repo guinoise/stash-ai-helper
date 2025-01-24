@@ -37,8 +37,8 @@ if os.path.exists("./README.md"):
 config.dev_mode= True
 with gr.Blocks(css=css, title="Stash AI", theme=gr.themes.Default()) as demo:
     with gr.Tabs(elem_id="main_tabs"):
-        stash_performers_tab()
         stash_scene_tab()
+        stash_performers_tab()
         with gr.Tab("Readme"):
             gr.Markdown(README)
         config_tab()
