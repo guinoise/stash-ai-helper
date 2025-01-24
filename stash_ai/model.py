@@ -38,7 +38,7 @@ class Performer(BaseModel):
     stash_image: Mapped[Optional[str]]= None
     main_image_phash: Mapped[Optional[str]]= mapped_column(ForeignKey("image.phash", name='fk_image'))
     main_image: Mapped["Img"]= relationship(foreign_keys=[main_image_phash])
-    stash_boxes_id: Mapped[List["PerformerStashBox"]] = relationship(back_populates="performer")
+    stash_boxes_id: Mapped[List["PerformerStashBox"]] = relationship(back_populates="performer", cascade='all, delete-orphan')
     stashbox_images: Mapped[List["PerformerStashBoxImage"]]= relationship(back_populates="performer")
     stash_updated_at: Mapped[Optional[datetime]]
     images: Mapped[List["Img"]]= relationship(secondary="performers_images")    
@@ -150,7 +150,7 @@ class Scene(BaseModel):
     extends_face_detection: Mapped[Optional[float]]
     nb_faces: Mapped[Optional[int]]    
     performers: Mapped[List[Performer]]= relationship(secondary=performers_scene)
-    images: Mapped[List["Img"]]= relationship(secondary="scenes_images")
+    images: Mapped[List["Img"]]= relationship(secondary="scenes_images", cascade='all, delete-orphan')
     group_identifications: Mapped[List["GroupIdentification"]]= relationship()
     
     def number_of_frames(self) -> int:
@@ -258,11 +258,11 @@ class Img(BaseModel):
     __tablename__ = "image"
     phash: Mapped[str]= mapped_column(primary_key=True)
     image_type: Mapped[ImageType]
-    external_uris: Mapped[List["ImgUri"]] = relationship(back_populates="img")
+    external_uris: Mapped[List["ImgUri"]] = relationship(back_populates="img", cascade='all, delete-orphan')
     performers: Mapped[List[Performer]]= relationship(secondary=performers_images)
     scenes: Mapped[List[Scene]]= relationship(secondary=scenes_images)
     original_scale: Mapped[Optional[int]]
-    files: Mapped[List["ImgFile"]]= relationship(back_populates="img") 
+    files: Mapped[List["ImgFile"]]= relationship(back_populates="img", cascade='all, delete-orphan') 
     #original: Mapped[Optional["ImgFile"]]= relationship(foreign_keys=[phash, original_scale])
 
     #__table_args__ = (ForeignKeyConstraint(["phash", "original_scale"], ["image_file.phash", "image_file.scale"], 'fk_original_img_file'), )
@@ -349,7 +349,7 @@ class ImageAnalysis(BaseModel):
     image_file: Mapped["ImgFile"]= relationship()
     detector: Mapped[str]
     expand_face: Mapped[float]
-    faces: Mapped[List["DeepfaceFace"]]= relationship()
+    faces: Mapped[List["DeepfaceFace"]]= relationship(cascade='all, delete-orphan')
         
     def __repr__(self):
         return f"{self.__class__.__module__}.{self.__class__.__name__} (Id: {self.id} ImgFileId: {self._image_file_id} Detector: {self.detector} Expand face: {self.expand_face}%))"
